@@ -24,12 +24,11 @@ if (!DISCORD_TOKEN || !CHANNEL_ID || !ROBLOX_USER_ID) {
   process.exit(1);
 }
 
-// Inicializar cliente de Discord
+// Inicializar cliente de Discord (Intents estándar sin MessageContent privilegiado)
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds, 
-    GatewayIntentBits.GuildMessages, 
-    GatewayIntentBits.MessageContent
+    GatewayIntentBits.GuildMessages
   ]
 });
 
@@ -94,16 +93,18 @@ async function getRobloxUserInfo(userId) {
   }
 }
 
-// Función para respuesta inmediata al comando /detected
-async function sendInstantStatus(targetChannel, robloxUser) {
+// Función para responder al Slash Command /detected
+async function handleDetectedSlashCommand(interaction, robloxUser) {
   try {
+    await interaction.deferReply();
+
     const data = await makeRobloxPostRequest('https://presence.roblox.com/v1/presence/users', {
       userIds: [parseInt(ROBLOX_USER_ID, 10)]
     });
 
     const presenceData = data?.userPresences?.[0];
     if (!presenceData) {
-      await targetChannel.send('No se pudieron obtener datos de presencia de Roblox en este momento.');
+      await interaction.editReply('No se pudieron obtener datos de presencia de Roblox en este momento.');
       return;
     }
 
@@ -115,7 +116,7 @@ async function sendInstantStatus(targetChannel, robloxUser) {
     const embed = new EmbedBuilder()
       .setColor(isPlaying ? 0x00FF00 : 0x3498DB)
       .setTitle(`🔎 Estado en tiempo real: ${robloxUser.displayName}`)
-      .setDescription(`Consulta solicitada mediante comando **/detected**.`)
+      .setDescription(`Consulta realizada mediante el comando **/detected**.`)
       .addFields(
         { name: '👤 Usuario', value: `**${robloxUser.displayName}** (@${robloxUser.name})`, inline: true },
         { name: '📊 Estado', value: PresenceTypes[userPresenceType] || 'Desconocido', inline: true },
@@ -131,10 +132,14 @@ async function sendInstantStatus(targetChannel, robloxUser) {
       .setTimestamp()
       .setFooter({ text: 'Monitoreo de Roblox (Sin mención)', iconURL: 'https://images.rbxcdn.com/264b971e44cc076f7b3a7b9319853c07.png' });
 
-    await targetChannel.send({ embeds: [embed] });
+    await interaction.editReply({ embeds: [embed] });
   } catch (error) {
     console.error('Error al ejecutar /detected:', error.message);
-    await targetChannel.send('Ocurrió un error al consultar el estado de Roblox.');
+    if (interaction.deferred || interaction.replied) {
+      await interaction.editReply('Ocurrió un error al consultar el estado de Roblox.');
+    } else {
+      await interaction.reply('Ocurrió un error al consultar el estado de Roblox.');
+    }
   }
 }
 
@@ -212,20 +217,31 @@ async function checkRobloxPresence(discordChannel, robloxUser) {
   }
 }
 
-// Escuchar mensajes en Discord para el comando /detected
-client.on('messageCreate', async (message) => {
-  if (message.author.bot) return;
-  if (message.content.trim().toLowerCase() === '/detected') {
+// Escuchar interacciones (Slash Command /detected)
+client.on('interactionCreate', async (interaction) => {
+  if (!interaction.isChatInputCommand()) return;
+  if (interaction.commandName === 'detected') {
     if (!cachedRobloxUser) {
       cachedRobloxUser = await getRobloxUserInfo(ROBLOX_USER_ID);
     }
-    await sendInstantStatus(message.channel, cachedRobloxUser);
+    await handleDetectedSlashCommand(interaction, cachedRobloxUser);
   }
 });
 
 client.once('ready', async () => {
   console.log(`Bot conectado exitosamente como ${client.user.tag}`);
   
+  // Registrar el comando de barra /detected globalmente en Discord
+  try {
+    await client.application.commands.create({
+      name: 'detected',
+      description: 'Muestra el estado en tiempo real del usuario monitoreado de Roblox'
+    });
+    console.log('Comando /detected registrado en Discord.');
+  } catch (err) {
+    console.error('Error al registrar comando /detected:', err.message);
+  }
+
   // Buscar el canal de Discord
   const channel = await client.channels.fetch(CHANNEL_ID).catch(err => {
     console.error(`Error al buscar el canal con ID ${CHANNEL_ID}:`, err.message);
