@@ -39,18 +39,7 @@ Created by 00JXPI.
 3. Run `npm install` in your terminal to install dependencies.
 4. Start the bot with `npm start`.
 
----
 
-## 24/7 Deployment (Render)
-
-Because this bot includes a lightweight built-in HTTP web server, you can host it for free on Render:
-
-1. Create a Web Service on Render and link this repository.
-2. Add your environment variables (DISCORD_TOKEN, DISCORD_CHANNEL_ID, ROBLOX_USER_ID, ROBLOX_COOKIE) in the Render environment settings panel.
-3. Deploy the service.
-4. Copy the URL Render provides and set up a free monitor on UptimeRobot or cron-job.org to ping it every 5 minutes. This will keep the free instance running 24/7.
-
----
 
 # Bot de Presencia de Roblox para Discord (Español)
 
@@ -93,13 +82,4 @@ Creado por 00JXPI.
 3. Ejecuta `npm install` en tu terminal para instalar las dependencias.
 4. Inicia el bot con `npm start`.
 
----
 
-## Alojamiento 24/7 en Render
-
-Gracias al servidor HTTP integrado, puedes alojarlo gratis en Render:
-
-1. Crea un Web Service en Render y conecta este repositorio.
-2. Configura las variables de entorno (DISCORD_TOKEN, DISCORD_CHANNEL_ID, ROBLOX_USER_ID, ROBLOX_COOKIE) en el panel de configuración de Render.
-3. Despliega la aplicación.
-4. Para evitar que la cuenta gratuita se suspenda por inactividad, copia la URL que te da Render y configúrala en un servicio gratuito como UptimeRobot o cron-job.org para hacerle consultas (pings) cada 5 minutos.
