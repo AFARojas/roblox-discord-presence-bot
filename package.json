@@ -1,0 +1,14 @@
+{
+  "name": "roblox-discord-presence-bot",
+  "version": "1.0.0",
+  "description": "Un bot de Discord que notifica cuando un usuario de Roblox entra a jugar a un juego.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.2",
+    "discord.js": "^14.15.3",
+    "dotenv": "^16.4.5"
+  }
+}
