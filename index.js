@@ -108,16 +108,13 @@ async function checkRobloxPresence(discordChannel, robloxUser) {
 
     // Detectar si el usuario ha entrado a un juego (Tipo de presencia 2 = InGame)
     if (userPresenceType === 2) {
-      // Se notifica si:
-      // 1. El estado anterior no era "En juego" (2)
-      // 2. O si ya estaba en juego, pero cambió de Juego principal (rootPlaceId diferente).
+      // Se notifica solo si el estado anterior no era "En juego" (2)
       const startedPlaying = lastState.presenceType !== 2;
-      const changedGame = lastState.presenceType === 2 && lastState.rootPlaceId !== currentRoot;
 
-      if (startedPlaying || changedGame) {
-        console.log(`¡Detectado cambio! Enviando notificación a Discord...`);
+      if (startedPlaying) {
+        console.log(`¡Detectado inicio de juego! Enviando notificación a Discord...`);
         
-        const gameUrl = `https://www.roblox.com/games/${currentRoot}`; // Usar el root ID para que el enlace sea al juego principal
+        const gameUrl = `https://www.roblox.com/games/${placeId}`;
         const embed = new EmbedBuilder()
           .setColor(0x00FF00) // Verde
           .setTitle(`¡${robloxUser.displayName} está jugando a algo!`)
