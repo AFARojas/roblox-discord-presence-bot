@@ -34,6 +34,7 @@ let lastState = {
   presenceType: null,
   placeId: null,
   rootPlaceId: null,
+  universeId: null,
   offlineChecksCount: 0
 };
 
@@ -107,14 +108,19 @@ async function checkRobloxPresence(discordChannel, robloxUser) {
       (userPresenceType === 2 ? ` en "${lastLocation}" (ID: ${placeId}, Root ID: ${currentRoot}, Universe: ${universeId})` : ''));
 
     // Detectar si el usuario ha entrado a un juego (Tipo de presencia 2 = InGame)
+    // Detectar si el usuario ha entrado a un juego (Tipo de presencia 2 = InGame)
     if (userPresenceType === 2) {
-      // Se notifica solo si el estado anterior no era "En juego" (2)
+      // Se notifica si:
+      // 1. El estado anterior no era "En juego" (2)
+      // 2. O si ya estaba en juego, pero cambió a un juego principal completamente diferente (universeId o rootPlaceId diferente).
       const startedPlaying = lastState.presenceType !== 2;
+      const changedGame = lastState.presenceType === 2 && 
+        (lastState.universeId !== universeId || lastState.rootPlaceId !== currentRoot);
 
-      if (startedPlaying) {
-        console.log(`¡Detectado inicio de juego! Enviando notificación a Discord...`);
+      if (startedPlaying || changedGame) {
+        console.log(`¡Detectado cambio o inicio de juego! Enviando notificación a Discord...`);
         
-        const gameUrl = `https://www.roblox.com/games/${placeId}`;
+        const gameUrl = `https://www.roblox.com/games/${currentRoot}`;
         const embed = new EmbedBuilder()
           .setColor(0x00FF00) // Verde
           .setTitle(`¡${robloxUser.displayName} está jugando a algo!`)
@@ -134,6 +140,7 @@ async function checkRobloxPresence(discordChannel, robloxUser) {
       lastState.presenceType = 2;
       lastState.placeId = placeId;
       lastState.rootPlaceId = currentRoot;
+      lastState.universeId = universeId;
       lastState.offlineChecksCount = 0;
     } else {
       // El usuario no está en juego. Incrementamos el contador de desconexión.
@@ -146,6 +153,7 @@ async function checkRobloxPresence(discordChannel, robloxUser) {
         lastState.presenceType = userPresenceType;
         lastState.placeId = null;
         lastState.rootPlaceId = null;
+        lastState.universeId = null;
       }
     }
 
