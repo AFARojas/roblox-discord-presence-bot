@@ -33,7 +33,7 @@ const client = new Client({
 let lastState = {
   presenceType: null,
   placeId: null,
-  universeId: null,
+  rootPlaceId: null,
   offlineChecksCount: 0
 };
 
@@ -100,23 +100,24 @@ async function checkRobloxPresence(discordChannel, robloxUser) {
       return;
     }
 
-    const { userPresenceType, placeId, lastLocation, universeId } = presenceData;
+    const { userPresenceType, placeId, rootPlaceId, lastLocation, universeId } = presenceData;
+    const currentRoot = rootPlaceId || placeId;
     
     console.log(`[${new Date().toLocaleTimeString()}] Estado de ${robloxUser.displayName}: ${PresenceTypes[userPresenceType] || 'Desconocido'}` + 
-      (userPresenceType === 2 ? ` en "${lastLocation}" (ID: ${placeId}, Universe: ${universeId})` : ''));
+      (userPresenceType === 2 ? ` en "${lastLocation}" (ID: ${placeId}, Root ID: ${currentRoot}, Universe: ${universeId})` : ''));
 
     // Detectar si el usuario ha entrado a un juego (Tipo de presencia 2 = InGame)
     if (userPresenceType === 2) {
       // Se notifica si:
       // 1. El estado anterior no era "En juego" (2)
-      // 2. O si ya estaba en juego, pero cambió de Juego principal (universeId diferente).
+      // 2. O si ya estaba en juego, pero cambió de Juego principal (rootPlaceId diferente).
       const startedPlaying = lastState.presenceType !== 2;
-      const changedGame = lastState.presenceType === 2 && lastState.universeId !== universeId;
+      const changedGame = lastState.presenceType === 2 && lastState.rootPlaceId !== currentRoot;
 
       if (startedPlaying || changedGame) {
         console.log(`¡Detectado cambio! Enviando notificación a Discord...`);
         
-        const gameUrl = `https://www.roblox.com/games/${placeId}`;
+        const gameUrl = `https://www.roblox.com/games/${currentRoot}`; // Usar el root ID para que el enlace sea al juego principal
         const embed = new EmbedBuilder()
           .setColor(0x00FF00) // Verde
           .setTitle(`¡${robloxUser.displayName} está jugando a algo!`)
@@ -135,19 +136,19 @@ async function checkRobloxPresence(discordChannel, robloxUser) {
       // Reiniciar contador de desconexión porque está en juego
       lastState.presenceType = 2;
       lastState.placeId = placeId;
-      lastState.universeId = universeId;
+      lastState.rootPlaceId = currentRoot;
       lastState.offlineChecksCount = 0;
     } else {
       // El usuario no está en juego. Incrementamos el contador de desconexión.
       lastState.offlineChecksCount += 1;
       
       // Solo consideramos que ha salido del juego oficialmente si se mantiene fuera
-      // durante 2 consultas consecutivas (aproximadamente 1 minuto con intervalo de 30s).
-      // Esto evita falsos positivos durante teletransportaciones/pantallas de carga.
-      if (lastState.offlineChecksCount >= 2 || lastState.presenceType === null) {
+      // durante 6 consultas consecutivas (aproximadamente 3 minutos con intervalo de 30s).
+      // Esto evita falsos positivos durante pantallas de carga y teletransportaciones largas.
+      if (lastState.offlineChecksCount >= 6 || lastState.presenceType === null) {
         lastState.presenceType = userPresenceType;
         lastState.placeId = null;
-        lastState.universeId = null;
+        lastState.rootPlaceId = null;
       }
     }
 
