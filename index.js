@@ -33,7 +33,8 @@ const client = new Client({
 let lastState = {
   presenceType: null,
   placeId: null,
-  universeId: null
+  universeId: null,
+  offlineChecksCount: 0
 };
 
 // Mapeo de tipos de presencia de Roblox
@@ -105,35 +106,50 @@ async function checkRobloxPresence(discordChannel, robloxUser) {
       (userPresenceType === 2 ? ` en "${lastLocation}" (ID: ${placeId}, Universe: ${universeId})` : ''));
 
     // Detectar si el usuario ha entrado a un juego (Tipo de presencia 2 = InGame)
-    // Se notifica si:
-    // 1. El estado anterior no era "En juego" y ahora sí lo es.
-    // 2. O si ya estaba en juego, pero cambió de Juego principal (universeId diferente).
-    const startedPlaying = userPresenceType === 2 && lastState.presenceType !== 2;
-    const changedGame = userPresenceType === 2 && lastState.presenceType === 2 && lastState.universeId !== universeId;
+    if (userPresenceType === 2) {
+      // Se notifica si:
+      // 1. El estado anterior no era "En juego" (2)
+      // 2. O si ya estaba en juego, pero cambió de Juego principal (universeId diferente).
+      const startedPlaying = lastState.presenceType !== 2;
+      const changedGame = lastState.presenceType === 2 && lastState.universeId !== universeId;
 
-    if (startedPlaying || changedGame) {
-      console.log(`¡Detectado cambio! Enviando notificación a Discord...`);
+      if (startedPlaying || changedGame) {
+        console.log(`¡Detectado cambio! Enviando notificación a Discord...`);
+        
+        const gameUrl = `https://www.roblox.com/games/${placeId}`;
+        const embed = new EmbedBuilder()
+          .setColor(0x00FF00) // Verde
+          .setTitle(`¡${robloxUser.displayName} está jugando a algo!`)
+          .setDescription(`**${robloxUser.displayName}** (@${robloxUser.name}) acaba de entrar a un juego.`)
+          .addFields(
+            { name: '🎮 Juego', value: lastLocation || 'Juego Desconocido', inline: true },
+            { name: '🔗 Enlace al juego', value: `[Haz clic aquí para unirte](${gameUrl})`, inline: true }
+          )
+          .setThumbnail(`https://www.roblox.com/headshot-thumbnail/image?userId=${ROBLOX_USER_ID}&width=150&height=150&format=png`)
+          .setTimestamp()
+          .setFooter({ text: 'Monitoreo de Roblox', iconURL: 'https://images.rbxcdn.com/264b971e44cc076f7b3a7b9319853c07.png' });
+
+        await discordChannel.send({ content: '@everyone', embeds: [embed] });
+      }
+
+      // Reiniciar contador de desconexión porque está en juego
+      lastState.presenceType = 2;
+      lastState.placeId = placeId;
+      lastState.universeId = universeId;
+      lastState.offlineChecksCount = 0;
+    } else {
+      // El usuario no está en juego. Incrementamos el contador de desconexión.
+      lastState.offlineChecksCount += 1;
       
-      const gameUrl = `https://www.roblox.com/games/${placeId}`;
-      const embed = new EmbedBuilder()
-        .setColor(0x00FF00) // Verde
-        .setTitle(`¡${robloxUser.displayName} está jugando a algo!`)
-        .setDescription(`**${robloxUser.displayName}** (@${robloxUser.name}) acaba de entrar a un juego.`)
-        .addFields(
-          { name: '🎮 Juego', value: lastLocation || 'Juego Desconocido', inline: true },
-          { name: '🔗 Enlace al juego', value: `[Haz clic aquí para unirte](${gameUrl})`, inline: true }
-        )
-        .setThumbnail(`https://www.roblox.com/headshot-thumbnail/image?userId=${ROBLOX_USER_ID}&width=150&height=150&format=png`)
-        .setTimestamp()
-        .setFooter({ text: 'Monitoreo de Roblox', iconURL: 'https://images.rbxcdn.com/264b971e44cc076f7b3a7b9319853c07.png' });
-
-      await discordChannel.send({ content: '@everyone', embeds: [embed] });
+      // Solo consideramos que ha salido del juego oficialmente si se mantiene fuera
+      // durante 2 consultas consecutivas (aproximadamente 1 minuto con intervalo de 30s).
+      // Esto evita falsos positivos durante teletransportaciones/pantallas de carga.
+      if (lastState.offlineChecksCount >= 2 || lastState.presenceType === null) {
+        lastState.presenceType = userPresenceType;
+        lastState.placeId = null;
+        lastState.universeId = null;
+      }
     }
-
-    // Actualizar el estado anterior
-    lastState.presenceType = userPresenceType;
-    lastState.placeId = placeId;
-    lastState.universeId = universeId;
 
   } catch (error) {
     console.error('Error al consultar la API de Roblox:', error.message);
