@@ -112,10 +112,11 @@ async function checkRobloxPresence(discordChannel, robloxUser) {
     if (userPresenceType === 2) {
       // Se notifica si:
       // 1. El estado anterior no era "En juego" (2)
-      // 2. O si ya estaba en juego, pero cambió a un juego principal completamente diferente (universeId o rootPlaceId diferente).
+      // 2. O si ya estaba en juego, pero cambió a un juego principal completamente diferente (universeId diferente y ambos válidos).
       const startedPlaying = lastState.presenceType !== 2;
       const changedGame = lastState.presenceType === 2 && 
-        (lastState.universeId !== universeId || lastState.rootPlaceId !== currentRoot);
+        universeId && lastState.universeId && 
+        lastState.universeId !== universeId;
 
       if (startedPlaying || changedGame) {
         console.log(`¡Detectado cambio o inicio de juego! Enviando notificación a Discord...`);
