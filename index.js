@@ -33,7 +33,7 @@ const client = new Client({
 let lastState = {
   presenceType: null,
   placeId: null,
-  gameId: null
+  universeId: null
 };
 
 // Mapeo de tipos de presencia de Roblox
@@ -99,18 +99,17 @@ async function checkRobloxPresence(discordChannel, robloxUser) {
       return;
     }
 
-    const { userPresenceType, placeId, gameId, lastLocation } = presenceData;
+    const { userPresenceType, placeId, lastLocation, universeId } = presenceData;
     
     console.log(`[${new Date().toLocaleTimeString()}] Estado de ${robloxUser.displayName}: ${PresenceTypes[userPresenceType] || 'Desconocido'}` + 
-      (userPresenceType === 2 ? ` en "${lastLocation}" (ID: ${placeId})` : ''));
+      (userPresenceType === 2 ? ` en "${lastLocation}" (ID: ${placeId}, Universe: ${universeId})` : ''));
 
     // Detectar si el usuario ha entrado a un juego (Tipo de presencia 2 = InGame)
     // Se notifica si:
     // 1. El estado anterior no era "En juego" y ahora sí lo es.
-    // 2. O si ya estaba en juego, pero cambió de Place/Juego (placeId diferente).
+    // 2. O si ya estaba en juego, pero cambió de Juego principal (universeId diferente).
     const startedPlaying = userPresenceType === 2 && lastState.presenceType !== 2;
-    const changedGame = userPresenceType === 2 && lastState.presenceType === 2 && 
-      (lastState.placeId !== placeId || (gameId && lastState.gameId && lastState.gameId !== gameId));
+    const changedGame = userPresenceType === 2 && lastState.presenceType === 2 && lastState.universeId !== universeId;
 
     if (startedPlaying || changedGame) {
       console.log(`¡Detectado cambio! Enviando notificación a Discord...`);
@@ -134,7 +133,7 @@ async function checkRobloxPresence(discordChannel, robloxUser) {
     // Actualizar el estado anterior
     lastState.presenceType = userPresenceType;
     lastState.placeId = placeId;
-    lastState.gameId = gameId;
+    lastState.universeId = universeId;
 
   } catch (error) {
     console.error('Error al consultar la API de Roblox:', error.message);
