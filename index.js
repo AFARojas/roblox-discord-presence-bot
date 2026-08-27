@@ -46,10 +46,17 @@ let cachedRobloxUser = null;
 
 // Mapeo de tipos de presencia de Roblox
 const PresenceTypes = {
-  0: 'Offline',
-  1: 'Online (Sitio Web)',
+  0: 'Offline 🔴',
+  1: 'Online (Sitio Web) 🌐',
   2: 'En Juego 🎮',
   3: 'En Studio 🛠️'
+};
+
+const PresenceColors = {
+  0: 0xE74C3C, // Rojo
+  1: 0x3498DB, // Azul
+  2: 0x2ECC71, // Verde
+  3: 0xF39C12  // Naranja
 };
 
 const ROBLOX_COOKIE = process.env.ROBLOX_COOKIE;
@@ -108,13 +115,16 @@ async function buildPresenceEmbed(robloxUser) {
   const isPlaying = userPresenceType === 2;
   const gameUrl = currentRoot ? `https://www.roblox.com/games/${currentRoot}` : null;
 
+  const statusText = PresenceTypes[userPresenceType] || 'Desconocido ❓';
+  const embedColor = PresenceColors[userPresenceType] || 0x95A5A6;
+
   const embed = new EmbedBuilder()
-    .setColor(isPlaying ? 0x00FF00 : 0x3498DB)
+    .setColor(embedColor)
     .setTitle(`🔎 Estado en tiempo real: ${robloxUser.displayName}`)
     .setDescription(`Consulta realizada mediante el comando **/detected**.`)
     .addFields(
       { name: '👤 Usuario', value: `**${robloxUser.displayName}** (@${robloxUser.name})`, inline: true },
-      { name: '📊 Estado', value: PresenceTypes[userPresenceType] || 'Desconocido', inline: true },
+      { name: '📊 Estado actual', value: statusText, inline: true },
       { name: '🎮 Juego actual', value: isPlaying ? (lastLocation || 'Juego Desconocido') : 'No está en juego', inline: false }
     );
 
