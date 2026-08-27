@@ -24,11 +24,12 @@ if (!DISCORD_TOKEN || !CHANNEL_ID || !ROBLOX_USER_ID) {
   process.exit(1);
 }
 
-// Inicializar cliente de Discord (Intents estándar sin MessageContent privilegiado)
+// Inicializar cliente de Discord (Intents completos para texto e interacciones)
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds, 
-    GatewayIntentBits.GuildMessages
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
   ]
 });
 
@@ -93,53 +94,76 @@ async function getRobloxUserInfo(userId) {
   }
 }
 
-// Función para responder al Slash Command /detected
+// Generar Embed de respuesta
+async function buildPresenceEmbed(robloxUser) {
+  const data = await makeRobloxPostRequest('https://presence.roblox.com/v1/presence/users', {
+    userIds: [parseInt(ROBLOX_USER_ID, 10)]
+  });
+
+  const presenceData = data?.userPresences?.[0];
+  if (!presenceData) return null;
+
+  const { userPresenceType, placeId, rootPlaceId, lastLocation } = presenceData;
+  const currentRoot = rootPlaceId || placeId;
+  const isPlaying = userPresenceType === 2;
+  const gameUrl = currentRoot ? `https://www.roblox.com/games/${currentRoot}` : null;
+
+  const embed = new EmbedBuilder()
+    .setColor(isPlaying ? 0x00FF00 : 0x3498DB)
+    .setTitle(`🔎 Estado en tiempo real: ${robloxUser.displayName}`)
+    .setDescription(`Consulta realizada mediante el comando **/detected**.`)
+    .addFields(
+      { name: '👤 Usuario', value: `**${robloxUser.displayName}** (@${robloxUser.name})`, inline: true },
+      { name: '📊 Estado', value: PresenceTypes[userPresenceType] || 'Desconocido', inline: true },
+      { name: '🎮 Juego actual', value: isPlaying ? (lastLocation || 'Juego Desconocido') : 'No está en juego', inline: false }
+    );
+
+  if (isPlaying && gameUrl) {
+    embed.addFields({ name: '🔗 Enlace para unirte', value: `[Haz clic aquí para entrar al juego](${gameUrl})`, inline: false });
+  }
+
+  embed
+    .setThumbnail(`https://www.roblox.com/headshot-thumbnail/image?userId=${ROBLOX_USER_ID}&width=150&height=150&format=png`)
+    .setTimestamp()
+    .setFooter({ text: 'Monitoreo de Roblox (Sin mención)', iconURL: 'https://images.rbxcdn.com/264b971e44cc076f7b3a7b9319853c07.png' });
+
+  return embed;
+}
+
+// Responder por Slash Command
 async function handleDetectedSlashCommand(interaction, robloxUser) {
   try {
     await interaction.deferReply();
+    const embed = await buildPresenceEmbed(robloxUser);
 
-    const data = await makeRobloxPostRequest('https://presence.roblox.com/v1/presence/users', {
-      userIds: [parseInt(ROBLOX_USER_ID, 10)]
-    });
-
-    const presenceData = data?.userPresences?.[0];
-    if (!presenceData) {
+    if (!embed) {
       await interaction.editReply('No se pudieron obtener datos de presencia de Roblox en este momento.');
       return;
     }
 
-    const { userPresenceType, placeId, rootPlaceId, lastLocation } = presenceData;
-    const currentRoot = rootPlaceId || placeId;
-    const isPlaying = userPresenceType === 2;
-    const gameUrl = currentRoot ? `https://www.roblox.com/games/${currentRoot}` : null;
-
-    const embed = new EmbedBuilder()
-      .setColor(isPlaying ? 0x00FF00 : 0x3498DB)
-      .setTitle(`🔎 Estado en tiempo real: ${robloxUser.displayName}`)
-      .setDescription(`Consulta realizada mediante el comando **/detected**.`)
-      .addFields(
-        { name: '👤 Usuario', value: `**${robloxUser.displayName}** (@${robloxUser.name})`, inline: true },
-        { name: '📊 Estado', value: PresenceTypes[userPresenceType] || 'Desconocido', inline: true },
-        { name: '🎮 Juego actual', value: isPlaying ? (lastLocation || 'Juego Desconocido') : 'No está en juego', inline: false }
-      );
-
-    if (isPlaying && gameUrl) {
-      embed.addFields({ name: '🔗 Enlace para unirte', value: `[Haz clic aquí para entrar al juego](${gameUrl})`, inline: false });
-    }
-
-    embed
-      .setThumbnail(`https://www.roblox.com/headshot-thumbnail/image?userId=${ROBLOX_USER_ID}&width=150&height=150&format=png`)
-      .setTimestamp()
-      .setFooter({ text: 'Monitoreo de Roblox (Sin mención)', iconURL: 'https://images.rbxcdn.com/264b971e44cc076f7b3a7b9319853c07.png' });
-
     await interaction.editReply({ embeds: [embed] });
   } catch (error) {
-    console.error('Error al ejecutar /detected:', error.message);
+    console.error('Error al ejecutar /detected por slash:', error.message);
     if (interaction.deferred || interaction.replied) {
       await interaction.editReply('Ocurrió un error al consultar el estado de Roblox.');
     } else {
       await interaction.reply('Ocurrió un error al consultar el estado de Roblox.');
     }
+  }
+}
+
+// Responder por mensaje directo de texto (/detected)
+async function handleDetectedTextMessage(message, robloxUser) {
+  try {
+    const embed = await buildPresenceEmbed(robloxUser);
+    if (!embed) {
+      await message.channel.send('No se pudieron obtener datos de presencia de Roblox en este momento.');
+      return;
+    }
+    await message.channel.send({ embeds: [embed] });
+  } catch (error) {
+    console.error('Error al ejecutar /detected por texto:', error.message);
+    await message.channel.send('Ocurrió un error al consultar el estado de Roblox.');
   }
 }
 
@@ -225,6 +249,17 @@ client.on('interactionCreate', async (interaction) => {
       cachedRobloxUser = await getRobloxUserInfo(ROBLOX_USER_ID);
     }
     await handleDetectedSlashCommand(interaction, cachedRobloxUser);
+  }
+});
+
+// Escuchar mensajes de texto directo (/detected)
+client.on('messageCreate', async (message) => {
+  if (message.author.bot) return;
+  if (message.content.trim().toLowerCase() === '/detected') {
+    if (!cachedRobloxUser) {
+      cachedRobloxUser = await getRobloxUserInfo(ROBLOX_USER_ID);
+    }
+    await handleDetectedTextMessage(message, cachedRobloxUser);
   }
 });
 
