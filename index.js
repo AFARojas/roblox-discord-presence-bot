@@ -26,7 +26,11 @@ if (!DISCORD_TOKEN || !CHANNEL_ID || !ROBLOX_USER_ID) {
 
 // Inicializar cliente de Discord
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
+  intents: [
+    GatewayIntentBits.Guilds, 
+    GatewayIntentBits.GuildMessages, 
+    GatewayIntentBits.MessageContent
+  ]
 });
 
 // Guardar el último estado para evitar notificaciones repetidas
@@ -37,6 +41,8 @@ let lastState = {
   universeId: null,
   offlineChecksCount: 0
 };
+
+let cachedRobloxUser = null;
 
 // Mapeo de tipos de presencia de Roblox
 const PresenceTypes = {
@@ -88,6 +94,50 @@ async function getRobloxUserInfo(userId) {
   }
 }
 
+// Función para respuesta inmediata al comando /detected
+async function sendInstantStatus(targetChannel, robloxUser) {
+  try {
+    const data = await makeRobloxPostRequest('https://presence.roblox.com/v1/presence/users', {
+      userIds: [parseInt(ROBLOX_USER_ID, 10)]
+    });
+
+    const presenceData = data?.userPresences?.[0];
+    if (!presenceData) {
+      await targetChannel.send('No se pudieron obtener datos de presencia de Roblox en este momento.');
+      return;
+    }
+
+    const { userPresenceType, placeId, rootPlaceId, lastLocation } = presenceData;
+    const currentRoot = rootPlaceId || placeId;
+    const isPlaying = userPresenceType === 2;
+    const gameUrl = currentRoot ? `https://www.roblox.com/games/${currentRoot}` : null;
+
+    const embed = new EmbedBuilder()
+      .setColor(isPlaying ? 0x00FF00 : 0x3498DB)
+      .setTitle(`🔎 Estado en tiempo real: ${robloxUser.displayName}`)
+      .setDescription(`Consulta solicitada mediante comando **/detected**.`)
+      .addFields(
+        { name: '👤 Usuario', value: `**${robloxUser.displayName}** (@${robloxUser.name})`, inline: true },
+        { name: '📊 Estado', value: PresenceTypes[userPresenceType] || 'Desconocido', inline: true },
+        { name: '🎮 Juego actual', value: isPlaying ? (lastLocation || 'Juego Desconocido') : 'No está en juego', inline: false }
+      );
+
+    if (isPlaying && gameUrl) {
+      embed.addFields({ name: '🔗 Enlace para unirte', value: `[Haz clic aquí para entrar al juego](${gameUrl})`, inline: false });
+    }
+
+    embed
+      .setThumbnail(`https://www.roblox.com/headshot-thumbnail/image?userId=${ROBLOX_USER_ID}&width=150&height=150&format=png`)
+      .setTimestamp()
+      .setFooter({ text: 'Monitoreo de Roblox (Sin mención)', iconURL: 'https://images.rbxcdn.com/264b971e44cc076f7b3a7b9319853c07.png' });
+
+    await targetChannel.send({ embeds: [embed] });
+  } catch (error) {
+    console.error('Error al ejecutar /detected:', error.message);
+    await targetChannel.send('Ocurrió un error al consultar el estado de Roblox.');
+  }
+}
+
 // Función principal de monitoreo
 async function checkRobloxPresence(discordChannel, robloxUser) {
   try {
@@ -107,7 +157,6 @@ async function checkRobloxPresence(discordChannel, robloxUser) {
     console.log(`[${new Date().toLocaleTimeString()}] Estado de ${robloxUser.displayName}: ${PresenceTypes[userPresenceType] || 'Desconocido'}` + 
       (userPresenceType === 2 ? ` en "${lastLocation}" (ID: ${placeId}, Root ID: ${currentRoot}, Universe: ${universeId})` : ''));
 
-    // Detectar si el usuario ha entrado a un juego (Tipo de presencia 2 = InGame)
     // Detectar si el usuario ha entrado a un juego (Tipo de presencia 2 = InGame)
     if (userPresenceType === 2) {
       // Se notifica si:
@@ -163,6 +212,17 @@ async function checkRobloxPresence(discordChannel, robloxUser) {
   }
 }
 
+// Escuchar mensajes en Discord para el comando /detected
+client.on('messageCreate', async (message) => {
+  if (message.author.bot) return;
+  if (message.content.trim().toLowerCase() === '/detected') {
+    if (!cachedRobloxUser) {
+      cachedRobloxUser = await getRobloxUserInfo(ROBLOX_USER_ID);
+    }
+    await sendInstantStatus(message.channel, cachedRobloxUser);
+  }
+});
+
 client.once('ready', async () => {
   console.log(`Bot conectado exitosamente como ${client.user.tag}`);
   
@@ -179,12 +239,12 @@ client.once('ready', async () => {
 
   // Obtener info del usuario de Roblox una vez al iniciar
   console.log(`Obteniendo información del usuario de Roblox con ID ${ROBLOX_USER_ID}...`);
-  const robloxUser = await getRobloxUserInfo(ROBLOX_USER_ID);
-  console.log(`Monitoreando a: ${robloxUser.displayName} (@${robloxUser.name})`);
+  cachedRobloxUser = await getRobloxUserInfo(ROBLOX_USER_ID);
+  console.log(`Monitoreando a: ${cachedRobloxUser.displayName} (@${cachedRobloxUser.name})`);
 
   // Ejecutar inmediatamente al iniciar y luego configurar intervalo
-  checkRobloxPresence(channel, robloxUser);
-  setInterval(() => checkRobloxPresence(channel, robloxUser), POLL_INTERVAL);
+  checkRobloxPresence(channel, cachedRobloxUser);
+  setInterval(() => checkRobloxPresence(channel, cachedRobloxUser), POLL_INTERVAL);
 });
 
 client.login(DISCORD_TOKEN);
