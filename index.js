@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 const axios = require('axios');
 const http = require('http');
 
@@ -252,19 +252,25 @@ async function checkRobloxPresence(discordChannel, robloxUser) {
 }
 
 // Manejador para el comando de borrado de mensajes (/clear)
-async function handleClearCommand(channel, amount, member, botMember) {
+async function handleClearCommand(channel, amount, member) {
   if (amount < 1) {
     return { success: false, message: 'Debes especificar un número mayor a 0.' };
   }
 
-  // Verificar permisos del bot
-  if (channel.guild && botMember && !botMember.permissionsIn(channel).has('ManageMessages')) {
-    return { success: false, message: '❌ No tengo permisos para gestionar mensajes en este canal.' };
+  // Verificar permisos del bot en el canal
+  if (channel.guild) {
+    const botPermissions = channel.permissionsFor(channel.client.user);
+    if (botPermissions && !botPermissions.has(PermissionFlagsBits.ManageMessages) && !botPermissions.has(PermissionFlagsBits.Administrator)) {
+      return { success: false, message: '❌ El bot necesita el permiso **Gestionar mensajes** (*Manage Messages*) en este canal para poder borrar.' };
+    }
   }
 
-  // Verificar permisos del usuario que ejecuta el comando (opcional pero recomendado)
-  if (member && !member.permissionsIn(channel).has('ManageMessages') && !member.permissions.has('Administrator')) {
-    return { success: false, message: '❌ No tienes permisos para borrar mensajes en este canal.' };
+  // Verificar permisos del usuario que ejecuta el comando
+  if (member && channel.guild) {
+    const userPermissions = channel.permissionsFor(member);
+    if (userPermissions && !userPermissions.has(PermissionFlagsBits.ManageMessages) && !userPermissions.has(PermissionFlagsBits.Administrator)) {
+      return { success: false, message: '❌ No tienes permisos para borrar mensajes en este canal.' };
+    }
   }
 
   try {
@@ -311,8 +317,7 @@ client.on('interactionCreate', async (interaction) => {
     const result = await handleClearCommand(
       interaction.channel, 
       amount, 
-      interaction.member, 
-      interaction.guild?.members.me
+      interaction.member
     );
 
     await interaction.editReply({ content: result.message });
@@ -340,8 +345,7 @@ client.on('messageCreate', async (message) => {
     const result = await handleClearCommand(
       message.channel,
       amount,
-      message.member,
-      message.guild?.members.me
+      message.member
     );
 
     const replyMsg = await message.channel.send(result.message);
@@ -355,29 +359,36 @@ client.on('messageCreate', async (message) => {
 client.once('ready', async () => {
   console.log(`Bot conectado exitosamente como ${client.user.tag}`);
   
-  // Registrar comandos de barra (/detected y /clear) globalmente en Discord
+  const slashCommands = [
+    {
+      name: 'detected',
+      description: 'Muestra el estado en tiempo real del usuario monitoreado de Roblox'
+    },
+    {
+      name: 'clear',
+      description: 'Borra una cantidad específica de mensajes en este canal',
+      options: [
+        {
+          name: 'cantidad',
+          description: 'Número de mensajes a borrar (de abajo hacia arriba)',
+          type: 4, // INTEGER
+          required: true,
+          min_value: 1,
+          max_value: 1000
+        }
+      ]
+    }
+  ];
+
+  // Registrar comandos en cada servidor (inmediato, 0 segundos de espera)
   try {
-    await client.application.commands.set([
-      {
-        name: 'detected',
-        description: 'Muestra el estado en tiempo real del usuario monitoreado de Roblox'
-      },
-      {
-        name: 'clear',
-        description: 'Borra una cantidad específica de mensajes en este canal',
-        options: [
-          {
-            name: 'cantidad',
-            description: 'Número de mensajes a borrar (de abajo hacia arriba)',
-            type: 4, // INTEGER
-            required: true,
-            min_value: 1,
-            max_value: 1000
-          }
-        ]
-      }
-    ]);
-    console.log('Comandos /detected y /clear registrados en Discord.');
+    for (const guild of client.guilds.cache.values()) {
+      await guild.commands.set(slashCommands);
+      console.log(`Comandos /detected y /clear registrados instantáneamente en servidor: ${guild.name}`);
+    }
+    // Registrar también a nivel global
+    await client.application.commands.set(slashCommands);
+    console.log('Comandos registrados globalmente en Discord.');
   } catch (err) {
     console.error('Error al registrar comandos slash:', err.message);
   }
