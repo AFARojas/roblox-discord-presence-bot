@@ -272,6 +272,11 @@ async function handleClearCommand(channel, amount) {
         break;
       }
       toDelete -= batchSize;
+
+      // Si aún quedan mensajes por borrar, esperamos 1 segundo para respetar los límites de la API de Discord
+      if (toDelete > 0) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
     }
 
     if (totalDeleted === 0) {
@@ -282,10 +287,15 @@ async function handleClearCommand(channel, amount) {
       };
     }
 
+    let extraNote = '';
+    if (totalDeleted < amount) {
+      extraNote = `\n*(Nota: No habían más mensajes en el canal o los restantes tienen más de 14 días de antigüedad, los cuales Discord no permite borrar en masa).*`;
+    }
+
     return { 
       success: true, 
       count: totalDeleted,
-      message: `🗑️ Se han borrado exitosamente **${totalDeleted}** mensaje(s) de este canal.`
+      message: `🗑️ Se han borrado exitosamente **${totalDeleted}** de **${amount}** mensaje(s) solicitados.${extraNote}`
     };
   } catch (error) {
     console.error('Error al borrar mensajes:', error);
