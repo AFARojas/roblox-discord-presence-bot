@@ -251,40 +251,135 @@ async function checkRobloxPresence(discordChannel, robloxUser) {
   }
 }
 
-// Escuchar interacciones (Slash Command /detected)
+// Manejador para el comando de borrado de mensajes (/clear)
+async function handleClearCommand(channel, amount, member, botMember) {
+  if (amount < 1) {
+    return { success: false, message: 'Debes especificar un número mayor a 0.' };
+  }
+
+  // Verificar permisos del bot
+  if (channel.guild && botMember && !botMember.permissionsIn(channel).has('ManageMessages')) {
+    return { success: false, message: '❌ No tengo permisos para gestionar mensajes en este canal.' };
+  }
+
+  // Verificar permisos del usuario que ejecuta el comando (opcional pero recomendado)
+  if (member && !member.permissionsIn(channel).has('ManageMessages') && !member.permissions.has('Administrator')) {
+    return { success: false, message: '❌ No tienes permisos para borrar mensajes en este canal.' };
+  }
+
+  try {
+    let toDelete = amount;
+    let totalDeleted = 0;
+
+    // Discord bulkDelete permite un máximo de 100 mensajes por llamada
+    while (toDelete > 0) {
+      const batchSize = Math.min(toDelete, 100);
+      const deleted = await channel.bulkDelete(batchSize, true);
+      totalDeleted += deleted.size;
+
+      // Si se borraron menos de los pedidos en este lote, probablemente no hay más mensajes o son mayores a 14 días
+      if (deleted.size < batchSize) {
+        break;
+      }
+      toDelete -= batchSize;
+    }
+
+    return { 
+      success: true, 
+      count: totalDeleted,
+      message: `🗑️ Se han borrado exitosamente **${totalDeleted}** mensaje(s) de este canal.`
+    };
+  } catch (error) {
+    console.error('Error al borrar mensajes:', error.message);
+    return { success: false, message: `❌ Error al intentar borrar los mensajes: ${error.message}` };
+  }
+}
+
+// Escuchar interacciones (Slash Commands /detected y /clear)
 client.on('interactionCreate', async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
+
   if (interaction.commandName === 'detected') {
     if (!cachedRobloxUser) {
       cachedRobloxUser = await getRobloxUserInfo(ROBLOX_USER_ID);
     }
     await handleDetectedSlashCommand(interaction, cachedRobloxUser);
+  } else if (interaction.commandName === 'clear') {
+    const amount = interaction.options.getInteger('cantidad');
+    await interaction.deferReply({ ephemeral: true });
+
+    const result = await handleClearCommand(
+      interaction.channel, 
+      amount, 
+      interaction.member, 
+      interaction.guild?.members.me
+    );
+
+    await interaction.editReply({ content: result.message });
   }
 });
 
-// Escuchar mensajes de texto directo (/detected)
+// Escuchar mensajes de texto directo (/detected y /clear)
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
-  if (message.content.trim().toLowerCase() === '/detected') {
+
+  const content = message.content.trim();
+
+  if (content.toLowerCase() === '/detected') {
     if (!cachedRobloxUser) {
       cachedRobloxUser = await getRobloxUserInfo(ROBLOX_USER_ID);
     }
     await handleDetectedTextMessage(message, cachedRobloxUser);
+  } else if (/^[/!]clear\s+(\d+)$/i.test(content)) {
+    const match = content.match(/^[/!]clear\s+(\d+)$/i);
+    const amount = parseInt(match[1], 10);
+
+    // Borrar el mensaje de invocación del comando primero si es posible
+    await message.delete().catch(() => {});
+
+    const result = await handleClearCommand(
+      message.channel,
+      amount,
+      message.member,
+      message.guild?.members.me
+    );
+
+    const replyMsg = await message.channel.send(result.message);
+    // Eliminar automáticamente el mensaje de confirmación después de 4 segundos
+    setTimeout(() => {
+      replyMsg.delete().catch(() => {});
+    }, 4000);
   }
 });
 
 client.once('ready', async () => {
   console.log(`Bot conectado exitosamente como ${client.user.tag}`);
   
-  // Registrar el comando de barra /detected globalmente en Discord
+  // Registrar comandos de barra (/detected y /clear) globalmente en Discord
   try {
-    await client.application.commands.create({
-      name: 'detected',
-      description: 'Muestra el estado en tiempo real del usuario monitoreado de Roblox'
-    });
-    console.log('Comando /detected registrado en Discord.');
+    await client.application.commands.set([
+      {
+        name: 'detected',
+        description: 'Muestra el estado en tiempo real del usuario monitoreado de Roblox'
+      },
+      {
+        name: 'clear',
+        description: 'Borra una cantidad específica de mensajes en este canal',
+        options: [
+          {
+            name: 'cantidad',
+            description: 'Número de mensajes a borrar (de abajo hacia arriba)',
+            type: 4, // INTEGER
+            required: true,
+            min_value: 1,
+            max_value: 1000
+          }
+        ]
+      }
+    ]);
+    console.log('Comandos /detected y /clear registrados en Discord.');
   } catch (err) {
-    console.error('Error al registrar comando /detected:', err.message);
+    console.error('Error al registrar comandos slash:', err.message);
   }
 
   // Buscar el canal de Discord

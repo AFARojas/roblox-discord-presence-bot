@@ -12,6 +12,9 @@ Created by 00JXPI.
 - Supports cookie authentication (.ROBLOSECURITY) to monitor presence even when the target user's join privacy is restricted.
 - Sends detailed messages with direct join links.
 - Includes a native HTTP server to prevent sleep on free hosting platforms like Render.
+- **Commands**:
+  - `/detected`: Shows real-time presence of the monitored Roblox user.
+  - `/clear <amount>`: Clears a specified number of messages in the channel (from bottom to top).
 
 ---
 
@@ -55,6 +58,9 @@ Creado por 00JXPI.
 - Soporta autenticación por cookie (.ROBLOSECURITY) para monitorear perfiles incluso si su privacidad está restringida a amigos o privada.
 - Envía mensajes detallados con enlaces directos para unirse.
 - Incluye un servidor HTTP nativo para evitar la suspensión en plataformas de hosting gratuito como Render.
+- **Comandos**:
+  - `/detected`: Muestra el estado en tiempo real del usuario de Roblox monitoreado.
+  - `/clear <cantidad>`: Borra la cantidad especificada de mensajes en el canal (de abajo hacia arriba).
 
 ---
 
