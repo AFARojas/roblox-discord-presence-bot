@@ -378,17 +378,15 @@ client.once('ready', async () => {
     }
   ];
 
-  // Registrar comandos en cada servidor (inmediato, 0 segundos de espera)
+  // Limpiar comandos duplicados de servidor y mantener únicamente el registro global
   try {
     for (const guild of client.guilds.cache.values()) {
-      await guild.commands.set(slashCommands);
-      console.log(`Comandos /detected y /clear registrados instantáneamente en servidor: ${guild.name}`);
+      await guild.commands.set([]);
     }
-    // Registrar también a nivel global
     await client.application.commands.set(slashCommands);
-    console.log('Comandos registrados globalmente en Discord.');
+    console.log('Comandos slash sincronizados globalmente (duplicados eliminados).');
   } catch (err) {
-    console.error('Error al registrar comandos slash:', err.message);
+    console.error('Error al sincronizar comandos slash:', err.message);
   }
 
   // Buscar el canal de Discord
