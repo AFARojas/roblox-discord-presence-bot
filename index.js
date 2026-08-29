@@ -252,25 +252,9 @@ async function checkRobloxPresence(discordChannel, robloxUser) {
 }
 
 // Manejador para el comando de borrado de mensajes (/clear)
-async function handleClearCommand(channel, amount, member) {
-  if (amount < 1) {
+async function handleClearCommand(channel, amount) {
+  if (!amount || amount < 1) {
     return { success: false, message: 'Debes especificar un número mayor a 0.' };
-  }
-
-  // Verificar permisos del bot en el canal
-  if (channel.guild) {
-    const botPermissions = channel.permissionsFor(channel.client.user);
-    if (botPermissions && !botPermissions.has(PermissionFlagsBits.ManageMessages) && !botPermissions.has(PermissionFlagsBits.Administrator)) {
-      return { success: false, message: '❌ El bot necesita el permiso **Gestionar mensajes** (*Manage Messages*) en este canal para poder borrar.' };
-    }
-  }
-
-  // Verificar permisos del usuario que ejecuta el comando
-  if (member && channel.guild) {
-    const userPermissions = channel.permissionsFor(member);
-    if (userPermissions && !userPermissions.has(PermissionFlagsBits.ManageMessages) && !userPermissions.has(PermissionFlagsBits.Administrator)) {
-      return { success: false, message: '❌ No tienes permisos para borrar mensajes en este canal.' };
-    }
   }
 
   try {
@@ -283,11 +267,19 @@ async function handleClearCommand(channel, amount, member) {
       const deleted = await channel.bulkDelete(batchSize, true);
       totalDeleted += deleted.size;
 
-      // Si se borraron menos de los pedidos en este lote, probablemente no hay más mensajes o son mayores a 14 días
+      // Si no se borraron mensajes o menos del lote solicitado, no hay más mensajes recientes (<14 días)
       if (deleted.size < batchSize) {
         break;
       }
       toDelete -= batchSize;
+    }
+
+    if (totalDeleted === 0) {
+      return {
+        success: true,
+        count: 0,
+        message: '⚠️ No se encontraron mensajes recientes (menores a 14 días) para borrar.'
+      };
     }
 
     return { 
@@ -296,7 +288,13 @@ async function handleClearCommand(channel, amount, member) {
       message: `🗑️ Se han borrado exitosamente **${totalDeleted}** mensaje(s) de este canal.`
     };
   } catch (error) {
-    console.error('Error al borrar mensajes:', error.message);
+    console.error('Error al borrar mensajes:', error);
+    if (error.code === 50013) {
+      return { 
+        success: false, 
+        message: '❌ El bot no tiene el permiso **Gestionar Mensajes** activado en este canal o servidor en Discord.' 
+      };
+    }
     return { success: false, message: `❌ Error al intentar borrar los mensajes: ${error.message}` };
   }
 }
