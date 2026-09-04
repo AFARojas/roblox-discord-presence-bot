@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, PermissionFlagsBits, ActivityType } = require('discord.js');
 const axios = require('axios');
 const http = require('http');
 
@@ -314,10 +314,25 @@ client.on('interactionCreate', async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
   if (interaction.commandName === 'detected') {
-    if (!cachedRobloxUser) {
-      cachedRobloxUser = await getRobloxUserInfo(ROBLOX_USER_ID);
+    try {
+      await interaction.deferReply();
+      if (!cachedRobloxUser) {
+        cachedRobloxUser = await getRobloxUserInfo(ROBLOX_USER_ID);
+      }
+      const embed = await buildPresenceEmbed(cachedRobloxUser);
+      if (!embed) {
+        await interaction.editReply('No se pudieron obtener datos de presencia de Roblox en este momento.');
+        return;
+      }
+      await interaction.editReply({ embeds: [embed] });
+    } catch (error) {
+      console.error('Error al ejecutar /detected por slash:', error.message);
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply('Ocurrió un error al consultar el estado de Roblox.');
+      } else {
+        await interaction.reply({ content: 'Ocurrió un error al consultar el estado de Roblox.', ephemeral: true });
+      }
     }
-    await handleDetectedSlashCommand(interaction, cachedRobloxUser);
   } else if (interaction.commandName === 'clear') {
     const amount = interaction.options.getInteger('cantidad');
     await interaction.deferReply({ ephemeral: true });
@@ -338,7 +353,7 @@ client.on('messageCreate', async (message) => {
 
   const content = message.content.trim();
 
-  if (content.toLowerCase() === '/detected') {
+  if (content.toLowerCase() === '/detected' || content.toLowerCase() === '!detected') {
     if (!cachedRobloxUser) {
       cachedRobloxUser = await getRobloxUserInfo(ROBLOX_USER_ID);
     }
@@ -364,8 +379,25 @@ client.on('messageCreate', async (message) => {
   }
 });
 
+client.on('error', (error) => {
+  console.error('Error del cliente de Discord:', error.message);
+});
+
 client.once('ready', async () => {
   console.log(`Bot conectado exitosamente como ${client.user.tag}`);
+
+  // Configurar presencia activa en verde
+  try {
+    client.user.setPresence({
+      status: 'online',
+      activities: [{
+        name: 'Roblox Presence 🟢',
+        type: ActivityType.Watching
+      }]
+    });
+  } catch (err) {
+    console.error('Error al configurar presencia:', err.message);
+  }
   
   const slashCommands = [
     {
