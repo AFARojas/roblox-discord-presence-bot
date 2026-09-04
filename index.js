@@ -1,4 +1,8 @@
 require('dotenv').config();
+const dns = require('dns');
+if (dns.setDefaultResultOrder) {
+  dns.setDefaultResultOrder('ipv4first');
+}
 const { Client, GatewayIntentBits, EmbedBuilder, PermissionFlagsBits, ActivityType } = require('discord.js');
 const axios = require('axios');
 const http = require('http');
@@ -380,7 +384,23 @@ client.on('messageCreate', async (message) => {
 });
 
 client.on('error', (error) => {
-  console.error('Error del cliente de Discord:', error.message);
+  console.error('[DISCORD ERROR]', error);
+});
+
+client.on('warn', (warning) => {
+  console.warn('[DISCORD WARN]', warning);
+});
+
+client.on('debug', (info) => {
+  console.log('[DISCORD DEBUG]', info);
+});
+
+client.on('shardError', (error, shardId) => {
+  console.error(`[DISCORD SHARD ERROR ${shardId}]`, error);
+});
+
+client.on('shardDisconnect', (event, shardId) => {
+  console.warn(`[DISCORD SHARD DISCONNECT ${shardId}]`, event);
 });
 
 client.once('ready', async () => {
@@ -452,4 +472,11 @@ client.once('ready', async () => {
   setInterval(() => checkRobloxPresence(channel, cachedRobloxUser), POLL_INTERVAL);
 });
 
-client.login(DISCORD_TOKEN);
+console.log('Conectando cliente a Discord Gateway con el token proporcionado...');
+client.login(DISCORD_TOKEN)
+  .then(() => {
+    console.log('client.login promesa resuelta correctamente.');
+  })
+  .catch((err) => {
+    console.error('ERROR CRÍTICO AL CONECTAR CON DISCORD:', err);
+  });
