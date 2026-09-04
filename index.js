@@ -224,14 +224,14 @@ async function checkRobloxPresence(discordChannel, robloxUser) {
     if (userPresenceType === 2) {
       // Se notifica si:
       // 1. El estado anterior no era "En juego" (2)
-      // 2. O si ya estaba en juego, pero cambió a un juego principal completamente diferente (universeId diferente y ambos válidos).
+      // 2. O si ya estaba en juego, pero cambió a un juego principal completamente diferente
       const startedPlaying = lastState.presenceType !== 2;
       const changedGame = lastState.presenceType === 2 && 
         universeId && lastState.universeId && 
         lastState.universeId !== universeId;
 
       if (startedPlaying || changedGame) {
-        console.log(`¡Detectado cambio o inicio de juego! Enviando notificación a Discord...`);
+        console.log(`¡Detectado cambio o inicio de juego! Enviando notificación a Discord con @everyone...`);
         
         const gameUrl = `https://www.roblox.com/games/${currentRoot}`;
         const embed = new EmbedBuilder()
@@ -246,7 +246,14 @@ async function checkRobloxPresence(discordChannel, robloxUser) {
           .setTimestamp()
           .setFooter({ text: 'Monitoreo de Roblox', iconURL: 'https://images.rbxcdn.com/264b971e44cc076f7b3a7b9319853c07.png' });
 
-        await discordChannel.send({ content: '@everyone', embeds: [embed] });
+        await discordChannel.send({ 
+          content: '@everyone', 
+          embeds: [embed],
+          allowedMentions: { parse: ['everyone'] }
+        });
+        console.log(`Notificación @everyone enviada con éxito al canal.`);
+      } else {
+        console.log(`ℹ️ [Filtro Antispam] ${robloxUser.displayName} sigue en el mismo juego ("${lastLocation}"). Ya fue notificado previamente, no se repite el @everyone.`);
       }
 
       // Reiniciar contador de desconexión porque está en juego
@@ -259,10 +266,11 @@ async function checkRobloxPresence(discordChannel, robloxUser) {
       // El usuario no está en juego. Incrementamos el contador de desconexión.
       lastState.offlineChecksCount += 1;
       
-      // Solo consideramos que ha salido del juego oficialmente si se mantiene fuera
-      // durante 6 consultas consecutivas (aproximadamente 3 minutos con intervalo de 30s).
-      // Esto evita falsos positivos durante pantallas de carga y teletransportaciones largas.
-      if (lastState.offlineChecksCount >= 6 || lastState.presenceType === null) {
+      // Si se mantiene fuera durante 2 consultas (1 minuto), reseteamos el estado oficial para detectar un nuevo reingreso
+      if (lastState.offlineChecksCount >= 2 || lastState.presenceType === null) {
+        if (lastState.presenceType === 2) {
+          console.log(`Usuario salió del juego. Estado reseteado para permitir nueva notificación al reingresar.`);
+        }
         lastState.presenceType = userPresenceType;
         lastState.placeId = null;
         lastState.rootPlaceId = null;
