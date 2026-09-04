@@ -9,7 +9,27 @@ const http = require('http');
 
 // Servidor HTTP simple para mantener vivo el bot en Render/Glitch (evita la suspensión)
 const PORT = process.env.PORT || 3000;
-http.createServer((req, res) => {
+http.createServer(async (req, res) => {
+  if (req.url === '/diag') {
+    try {
+      const start = Date.now();
+      const r = await axios.get('https://discord.com/api/v10/gateway/bot', {
+        headers: { Authorization: `Bot ${process.env.DISCORD_TOKEN}` },
+        timeout: 10000
+      });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ ok: true, duration: Date.now() - start, data: r.data }));
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({
+        ok: false,
+        status: e.response?.status,
+        statusText: e.response?.statusText,
+        data: e.response?.data,
+        message: e.message
+      }));
+    }
+  }
   res.writeHead(200, { 'Content-Type': 'text/plain' });
   res.end('Roblox Discord presence bot is active!\n');
 }).listen(PORT, () => {
