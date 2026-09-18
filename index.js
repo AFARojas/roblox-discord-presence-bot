@@ -1,4 +1,6 @@
 require('dotenv').config();
+const fs = require('fs');
+const path = require('path');
 const dns = require('dns');
 if (dns.setDefaultResultOrder) {
   dns.setDefaultResultOrder('ipv4first');
@@ -56,6 +58,33 @@ const client = new Client({
     GatewayIntentBits.MessageContent
   ]
 });
+
+// Archivo de persistencia de configuración local (para recordar el estado de /on y /off)
+const SETTINGS_FILE = path.join(__dirname, 'settings.json');
+
+function loadSettings() {
+  try {
+    if (fs.existsSync(SETTINGS_FILE)) {
+      const data = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+      if (typeof data.notificationsEnabled === 'boolean') {
+        return { notificationsEnabled: data.notificationsEnabled };
+      }
+    }
+  } catch (err) {
+    console.error('Error al cargar settings.json:', err.message);
+  }
+  return { notificationsEnabled: true };
+}
+
+function saveSettings(settings) {
+  try {
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf8');
+  } catch (err) {
+    console.error('Error al guardar settings.json:', err.message);
+  }
+}
+
+let botSettings = loadSettings();
 
 // Guardar el último estado para evitar notificaciones repetidas
 let lastState = {
@@ -149,6 +178,7 @@ async function buildPresenceEmbed(robloxUser) {
     .addFields(
       { name: '👤 Usuario', value: `**${robloxUser.displayName}** (@${robloxUser.name})`, inline: true },
       { name: '📊 Estado actual', value: statusText, inline: true },
+      { name: '🔔 Notificaciones automáticas', value: botSettings.notificationsEnabled ? 'Activadas 🟢 (/on)' : 'Desactivadas 🔴 (/off)', inline: true },
       { name: '🎮 Juego actual', value: isPlaying ? (lastLocation || 'Juego Desconocido') : 'No está en juego', inline: false }
     );
 
@@ -231,27 +261,31 @@ async function checkRobloxPresence(discordChannel, robloxUser) {
         lastState.universeId !== universeId;
 
       if (startedPlaying || changedGame) {
-        console.log(`¡Detectado cambio o inicio de juego! Enviando notificación a Discord con @everyone...`);
-        
-        const gameUrl = `https://www.roblox.com/games/${currentRoot}`;
-        const embed = new EmbedBuilder()
-          .setColor(0x00FF00) // Verde
-          .setTitle(`¡${robloxUser.displayName} está jugando a algo!`)
-          .setDescription(`**${robloxUser.displayName}** (@${robloxUser.name}) acaba de entrar a un juego.`)
-          .addFields(
-            { name: '🎮 Juego', value: lastLocation || 'Juego Desconocido', inline: true },
-            { name: '🔗 Enlace al juego', value: `[Haz clic aquí para unirte](${gameUrl})`, inline: true }
-          )
-          .setThumbnail(`https://www.roblox.com/headshot-thumbnail/image?userId=${ROBLOX_USER_ID}&width=150&height=150&format=png`)
-          .setTimestamp()
-          .setFooter({ text: 'Monitoreo de Roblox', iconURL: 'https://images.rbxcdn.com/264b971e44cc076f7b3a7b9319853c07.png' });
+        if (botSettings.notificationsEnabled) {
+          console.log(`¡Detectado cambio o inicio de juego! Enviando notificación a Discord con @everyone...`);
+          
+          const gameUrl = `https://www.roblox.com/games/${currentRoot}`;
+          const embed = new EmbedBuilder()
+            .setColor(0x00FF00) // Verde
+            .setTitle(`¡${robloxUser.displayName} está jugando a algo!`)
+            .setDescription(`**${robloxUser.displayName}** (@${robloxUser.name}) acaba de entrar a un juego.`)
+            .addFields(
+              { name: '🎮 Juego', value: lastLocation || 'Juego Desconocido', inline: true },
+              { name: '🔗 Enlace al juego', value: `[Haz clic aquí para unirte](${gameUrl})`, inline: true }
+            )
+            .setThumbnail(`https://www.roblox.com/headshot-thumbnail/image?userId=${ROBLOX_USER_ID}&width=150&height=150&format=png`)
+            .setTimestamp()
+            .setFooter({ text: 'Monitoreo de Roblox', iconURL: 'https://images.rbxcdn.com/264b971e44cc076f7b3a7b9319853c07.png' });
 
-        await discordChannel.send({ 
-          content: '@everyone', 
-          embeds: [embed],
-          allowedMentions: { parse: ['everyone'] }
-        });
-        console.log(`Notificación @everyone enviada con éxito al canal.`);
+          await discordChannel.send({ 
+            content: '@everyone', 
+            embeds: [embed],
+            allowedMentions: { parse: ['everyone'] }
+          });
+          console.log(`Notificación @everyone enviada con éxito al canal.`);
+        } else {
+          console.log(`ℹ️ [Notificaciones Desactivadas (/off)] ${robloxUser.displayName} entró o cambió a "${lastLocation}". Alerta en Discord omitida.`);
+        }
       } else {
         console.log(`ℹ️ [Filtro Antispam] ${robloxUser.displayName} sigue en el mismo juego ("${lastLocation}"). Ya fue notificado previamente, no se repite el @everyone.`);
       }
@@ -341,7 +375,55 @@ async function handleClearCommand(channel, amount) {
   }
 }
 
-// Escuchar interacciones (Slash Commands /detected y /clear)
+// Manejador para activar o desactivar las notificaciones automáticas (/on y /off)
+function handleToggleNotifications(enable, robloxUser) {
+  const userName = robloxUser ? robloxUser.displayName : `Usuario (${ROBLOX_USER_ID})`;
+  const userTag = robloxUser ? `(@${robloxUser.name})` : '';
+
+  if (enable) {
+    if (botSettings.notificationsEnabled) {
+      const embed = new EmbedBuilder()
+        .setColor(0x3498DB)
+        .setTitle('ℹ️ Notificaciones ya activadas')
+        .setDescription(`Las notificaciones automáticas para **${userName}** ${userTag} ya están **activadas**.`)
+        .setTimestamp();
+      return { alreadyInState: true, embed };
+    }
+
+    botSettings.notificationsEnabled = true;
+    saveSettings(botSettings);
+    console.log(`[Configuración] Notificaciones automáticas activadas (/on).`);
+
+    const embed = new EmbedBuilder()
+      .setColor(0x2ECC71)
+      .setTitle('🔔 Notificaciones Activadas')
+      .setDescription(`Se han **activado** las notificaciones automáticas para **${userName}** ${userTag}.\n\nEl bot volverá a avisar con \`@everyone\` cuando entre a un juego.`)
+      .setTimestamp();
+    return { alreadyInState: false, embed };
+  } else {
+    if (!botSettings.notificationsEnabled) {
+      const embed = new EmbedBuilder()
+        .setColor(0x3498DB)
+        .setTitle('ℹ️ Notificaciones ya desactivadas')
+        .setDescription(`Las notificaciones automáticas para **${userName}** ${userTag} ya están **desactivadas**.`)
+        .setTimestamp();
+      return { alreadyInState: true, embed };
+    }
+
+    botSettings.notificationsEnabled = false;
+    saveSettings(botSettings);
+    console.log(`[Configuración] Notificaciones automáticas desactivadas (/off).`);
+
+    const embed = new EmbedBuilder()
+      .setColor(0xE74C3C)
+      .setTitle('🔕 Notificaciones Desactivadas')
+      .setDescription(`Se han **desactivado** las notificaciones automáticas para **${userName}** ${userTag}.\n\nEl bot **no** enviará alertas automáticas de juego. Las demás funciones (como \`/detected\` y \`/clear\`) siguen funcionando con normalidad.`)
+      .setTimestamp();
+    return { alreadyInState: false, embed };
+  }
+}
+
+// Escuchar interacciones (Slash Commands /detected, /clear, /on, /off)
 client.on('interactionCreate', async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
@@ -376,6 +458,36 @@ client.on('interactionCreate', async (interaction) => {
     );
 
     await interaction.editReply({ content: result.message });
+  } else if (interaction.commandName === 'on') {
+    try {
+      if (!cachedRobloxUser) {
+        cachedRobloxUser = await getRobloxUserInfo(ROBLOX_USER_ID);
+      }
+      const { embed } = handleToggleNotifications(true, cachedRobloxUser);
+      await interaction.reply({ embeds: [embed] });
+    } catch (error) {
+      console.error('Error al ejecutar /on por slash:', error.message);
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply('Ocurrió un error al activar las notificaciones.');
+      } else {
+        await interaction.reply({ content: 'Ocurrió un error al activar las notificaciones.', ephemeral: true });
+      }
+    }
+  } else if (interaction.commandName === 'off') {
+    try {
+      if (!cachedRobloxUser) {
+        cachedRobloxUser = await getRobloxUserInfo(ROBLOX_USER_ID);
+      }
+      const { embed } = handleToggleNotifications(false, cachedRobloxUser);
+      await interaction.reply({ embeds: [embed] });
+    } catch (error) {
+      console.error('Error al ejecutar /off por slash:', error.message);
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply('Ocurrió un error al desactivar las notificaciones.');
+      } else {
+        await interaction.reply({ content: 'Ocurrió un error al desactivar las notificaciones.', ephemeral: true });
+      }
+    }
   }
 });
 
@@ -408,6 +520,28 @@ client.on('messageCreate', async (message) => {
     setTimeout(() => {
       replyMsg.delete().catch(() => {});
     }, 4000);
+  } else if (content.toLowerCase() === '/on' || content.toLowerCase() === '!on') {
+    try {
+      if (!cachedRobloxUser) {
+        cachedRobloxUser = await getRobloxUserInfo(ROBLOX_USER_ID);
+      }
+      const { embed } = handleToggleNotifications(true, cachedRobloxUser);
+      await message.channel.send({ embeds: [embed] });
+    } catch (error) {
+      console.error('Error al ejecutar /on por texto:', error.message);
+      await message.channel.send('Ocurrió un error al activar las notificaciones.');
+    }
+  } else if (content.toLowerCase() === '/off' || content.toLowerCase() === '!off') {
+    try {
+      if (!cachedRobloxUser) {
+        cachedRobloxUser = await getRobloxUserInfo(ROBLOX_USER_ID);
+      }
+      const { embed } = handleToggleNotifications(false, cachedRobloxUser);
+      await message.channel.send({ embeds: [embed] });
+    } catch (error) {
+      console.error('Error al ejecutar /off por texto:', error.message);
+      await message.channel.send('Ocurrió un error al desactivar las notificaciones.');
+    }
   }
 });
 
@@ -465,6 +599,14 @@ client.once('ready', async () => {
           max_value: 1000
         }
       ]
+    },
+    {
+      name: 'on',
+      description: 'Activa las notificaciones automáticas cuando el usuario de Roblox entra a jugar'
+    },
+    {
+      name: 'off',
+      description: 'Desactiva las notificaciones automáticas cuando el usuario de Roblox entra a jugar'
     }
   ];
 

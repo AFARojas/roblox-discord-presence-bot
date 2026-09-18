@@ -1,3 +1,4 @@
 node_modules/
 .env
 deploy_to_render.js
+settings.json
