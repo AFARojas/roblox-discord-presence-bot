@@ -620,14 +620,13 @@ client.once('ready', async () => {
     }
   ];
 
-  // Registrar comandos slash tanto a nivel de servidor (inmediato para autocompletar) como global
+  // Limpiar comandos duplicados de servidor y mantener únicamente el registro global
   try {
     for (const guild of client.guilds.cache.values()) {
-      await guild.commands.set(slashCommands);
-      console.log(`Comandos slash registrados inmediatamente en servidor: ${guild.name} (${guild.id})`);
+      await guild.commands.set([]);
     }
     await client.application.commands.set(slashCommands);
-    console.log('Comandos slash sincronizados globalmente y en servidores.');
+    console.log('Comandos slash sincronizados globalmente (duplicados de servidor eliminados).');
   } catch (err) {
     console.error('Error al sincronizar comandos slash:', err.message);
   }
