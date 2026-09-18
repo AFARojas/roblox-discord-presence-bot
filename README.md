@@ -15,8 +15,8 @@ Created by 00JXPI.
 - **Commands**:
   - `/detected`: Shows real-time presence of the monitored Roblox user.
   - `/clear <amount>`: Clears a specified number of messages in the channel (from bottom to top).
-  - `/on`: Enables automatic game alerts for the monitored user.
-  - `/off`: Disables automatic game alerts for the monitored user (other bot commands remain active).
+  - `/on`: Enables `@everyone` mention in game notifications.
+  - `/off`: Disables `@everyone` mention in game notifications (the bot will still send the message and join link in silent mode).
 
 ---
 
@@ -63,8 +63,8 @@ Creado por 00JXPI.
 - **Comandos**:
   - `/detected`: Muestra el estado en tiempo real del usuario de Roblox monitoreado.
   - `/clear <cantidad>`: Borra la cantidad especificada de mensajes en el canal (de abajo hacia arriba).
-  - `/on`: Activa las notificaciones automáticas cuando la persona elegida entra a jugar.
-  - `/off`: Desactiva las notificaciones automáticas de la persona elegida (el resto de funciones como `/detected` siguen funcionando normalmente).
+  - `/on`: Activa la mención `@everyone` cuando el usuario entra a jugar.
+  - `/off`: Desactiva la mención `@everyone` (el bot sigue mandando el mensaje y enlace al juego, pero en silencio sin etiquetar a todos).
 
 ---
 

@@ -66,14 +66,17 @@ function loadSettings() {
   try {
     if (fs.existsSync(SETTINGS_FILE)) {
       const data = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+      if (typeof data.everyoneMentionEnabled === 'boolean') {
+        return { everyoneMentionEnabled: data.everyoneMentionEnabled };
+      }
       if (typeof data.notificationsEnabled === 'boolean') {
-        return { notificationsEnabled: data.notificationsEnabled };
+        return { everyoneMentionEnabled: data.notificationsEnabled };
       }
     }
   } catch (err) {
     console.error('Error al cargar settings.json:', err.message);
   }
-  return { notificationsEnabled: true };
+  return { everyoneMentionEnabled: true };
 }
 
 function saveSettings(settings) {
@@ -178,7 +181,7 @@ async function buildPresenceEmbed(robloxUser) {
     .addFields(
       { name: '👤 Usuario', value: `**${robloxUser.displayName}** (@${robloxUser.name})`, inline: true },
       { name: '📊 Estado actual', value: statusText, inline: true },
-      { name: '🔔 Notificaciones automáticas', value: botSettings.notificationsEnabled ? 'Activadas 🟢 (/on)' : 'Desactivadas 🔴 (/off)', inline: true },
+      { name: '📢 Mención @everyone', value: botSettings.everyoneMentionEnabled ? 'Activada 🟢 (/on)' : 'Desactivada 🔴 (/off)', inline: true },
       { name: '🎮 Juego actual', value: isPlaying ? (lastLocation || 'Juego Desconocido') : 'No está en juego', inline: false }
     );
 
@@ -261,33 +264,40 @@ async function checkRobloxPresence(discordChannel, robloxUser) {
         lastState.universeId !== universeId;
 
       if (startedPlaying || changedGame) {
-        if (botSettings.notificationsEnabled) {
-          console.log(`¡Detectado cambio o inicio de juego! Enviando notificación a Discord con @everyone...`);
-          
-          const gameUrl = `https://www.roblox.com/games/${currentRoot}`;
-          const embed = new EmbedBuilder()
-            .setColor(0x00FF00) // Verde
-            .setTitle(`¡${robloxUser.displayName} está jugando a algo!`)
-            .setDescription(`**${robloxUser.displayName}** (@${robloxUser.name}) acaba de entrar a un juego.`)
-            .addFields(
-              { name: '🎮 Juego', value: lastLocation || 'Juego Desconocido', inline: true },
-              { name: '🔗 Enlace al juego', value: `[Haz clic aquí para unirte](${gameUrl})`, inline: true }
-            )
-            .setThumbnail(`https://www.roblox.com/headshot-thumbnail/image?userId=${ROBLOX_USER_ID}&width=150&height=150&format=png`)
-            .setTimestamp()
-            .setFooter({ text: 'Monitoreo de Roblox', iconURL: 'https://images.rbxcdn.com/264b971e44cc076f7b3a7b9319853c07.png' });
+        console.log(`¡Detectado cambio o inicio de juego! Mención @everyone: ${botSettings.everyoneMentionEnabled ? 'ACTIVADA' : 'DESACTIVADA'}`);
+        
+        const gameUrl = `https://www.roblox.com/games/${currentRoot}`;
+        const embed = new EmbedBuilder()
+          .setColor(0x00FF00) // Verde
+          .setTitle(`¡${robloxUser.displayName} está jugando a algo!`)
+          .setDescription(`**${robloxUser.displayName}** (@${robloxUser.name}) acaba de entrar a un juego.`)
+          .addFields(
+            { name: '🎮 Juego', value: lastLocation || 'Juego Desconocido', inline: true },
+            { name: '🔗 Enlace al juego', value: `[Haz clic aquí para unirte](${gameUrl})`, inline: true }
+          )
+          .setThumbnail(`https://www.roblox.com/headshot-thumbnail/image?userId=${ROBLOX_USER_ID}&width=150&height=150&format=png`)
+          .setTimestamp()
+          .setFooter({ 
+            text: `Monitoreo de Roblox • ${botSettings.everyoneMentionEnabled ? '@everyone activo' : 'Modo silencioso (sin @everyone)'}`, 
+            iconURL: 'https://images.rbxcdn.com/264b971e44cc076f7b3a7b9319853c07.png' 
+          });
 
+        if (botSettings.everyoneMentionEnabled) {
           await discordChannel.send({ 
             content: '@everyone', 
             embeds: [embed],
             allowedMentions: { parse: ['everyone'] }
           });
-          console.log(`Notificación @everyone enviada con éxito al canal.`);
+          console.log(`Notificación enviada con éxito al canal CON @everyone.`);
         } else {
-          console.log(`ℹ️ [Notificaciones Desactivadas (/off)] ${robloxUser.displayName} entró o cambió a "${lastLocation}". Alerta en Discord omitida.`);
+          await discordChannel.send({ 
+            embeds: [embed],
+            allowedMentions: { parse: [] }
+          });
+          console.log(`Notificación enviada con éxito al canal SIN @everyone (modo silencioso).`);
         }
       } else {
-        console.log(`ℹ️ [Filtro Antispam] ${robloxUser.displayName} sigue en el mismo juego ("${lastLocation}"). Ya fue notificado previamente, no se repite el @everyone.`);
+        console.log(`ℹ️ [Filtro Antispam] ${robloxUser.displayName} sigue en el mismo juego ("${lastLocation}"). Ya fue notificado previamente, no se repite el aviso.`);
       }
 
       // Reiniciar contador de desconexión porque está en juego
@@ -375,49 +385,49 @@ async function handleClearCommand(channel, amount) {
   }
 }
 
-// Manejador para activar o desactivar las notificaciones automáticas (/on y /off)
+// Manejador para activar o desactivar la mención @everyone (/on y /off)
 function handleToggleNotifications(enable, robloxUser) {
   const userName = robloxUser ? robloxUser.displayName : `Usuario (${ROBLOX_USER_ID})`;
   const userTag = robloxUser ? `(@${robloxUser.name})` : '';
 
   if (enable) {
-    if (botSettings.notificationsEnabled) {
+    if (botSettings.everyoneMentionEnabled) {
       const embed = new EmbedBuilder()
-        .setColor(0x3498DB)
-        .setTitle('ℹ️ Notificaciones ya activadas')
-        .setDescription(`Las notificaciones automáticas para **${userName}** ${userTag} ya están **activadas**.`)
+        .setColor(0x3498DB) // Azul
+        .setTitle('ℹ️ Modo sin cambios: Ya estaba activado')
+        .setDescription(`El bot ya está configurado para enviar alertas **CON mención @everyone** para **${userName}** ${userTag}.`)
         .setTimestamp();
       return { alreadyInState: true, embed };
     }
 
-    botSettings.notificationsEnabled = true;
+    botSettings.everyoneMentionEnabled = true;
     saveSettings(botSettings);
-    console.log(`[Configuración] Notificaciones automáticas activadas (/on).`);
+    console.log(`[Configuración] Modo cambiado: Mención @everyone activada (/on).`);
 
     const embed = new EmbedBuilder()
-      .setColor(0x2ECC71)
-      .setTitle('🔔 Notificaciones Activadas')
-      .setDescription(`Se han **activado** las notificaciones automáticas para **${userName}** ${userTag}.\n\nEl bot volverá a avisar con \`@everyone\` cuando entre a un juego.`)
+      .setColor(0x2ECC71) // Verde
+      .setTitle('🔔 Modo Cambiado: Mención @everyone Activada')
+      .setDescription(`✅ **Configuración actualizada con éxito.**\n\nAhora, cuando **${userName}** ${userTag} entre a un juego, el bot enviará la alerta **mencionando a @everyone**.`)
       .setTimestamp();
     return { alreadyInState: false, embed };
   } else {
-    if (!botSettings.notificationsEnabled) {
+    if (!botSettings.everyoneMentionEnabled) {
       const embed = new EmbedBuilder()
-        .setColor(0x3498DB)
-        .setTitle('ℹ️ Notificaciones ya desactivadas')
-        .setDescription(`Las notificaciones automáticas para **${userName}** ${userTag} ya están **desactivadas**.`)
+        .setColor(0x3498DB) // Azul
+        .setTitle('ℹ️ Modo sin cambios: Ya estaba desactivado')
+        .setDescription(`El bot ya está configurado para enviar alertas **SIN mención @everyone** para **${userName}** ${userTag}.`)
         .setTimestamp();
       return { alreadyInState: true, embed };
     }
 
-    botSettings.notificationsEnabled = false;
+    botSettings.everyoneMentionEnabled = false;
     saveSettings(botSettings);
-    console.log(`[Configuración] Notificaciones automáticas desactivadas (/off).`);
+    console.log(`[Configuración] Modo cambiado: Mención @everyone desactivada (/off).`);
 
     const embed = new EmbedBuilder()
-      .setColor(0xE74C3C)
-      .setTitle('🔕 Notificaciones Desactivadas')
-      .setDescription(`Se han **desactivado** las notificaciones automáticas para **${userName}** ${userTag}.\n\nEl bot **no** enviará alertas automáticas de juego. Las demás funciones (como \`/detected\` y \`/clear\`) siguen funcionando con normalidad.`)
+      .setColor(0xE74C3C) // Rojo
+      .setTitle('🔕 Modo Cambiado: Mención @everyone Desactivada')
+      .setDescription(`✅ **Configuración actualizada con éxito.**\n\nAhora, cuando **${userName}** ${userTag} entre a un juego, **se seguirá enviando el mensaje con la tarjeta del juego y enlace**, pero **SIN mencionar a @everyone** (modo silencioso).`)
       .setTimestamp();
     return { alreadyInState: false, embed };
   }
@@ -602,21 +612,22 @@ client.once('ready', async () => {
     },
     {
       name: 'on',
-      description: 'Activa las notificaciones automáticas cuando el usuario de Roblox entra a jugar'
+      description: 'Activa la mención @everyone en los mensajes cuando entra a jugar'
     },
     {
       name: 'off',
-      description: 'Desactiva las notificaciones automáticas cuando el usuario de Roblox entra a jugar'
+      description: 'Desactiva la mención @everyone (sigue enviando mensaje pero sin ping)'
     }
   ];
 
-  // Limpiar comandos duplicados de servidor y mantener únicamente el registro global
+  // Registrar comandos slash tanto a nivel de servidor (inmediato para autocompletar) como global
   try {
     for (const guild of client.guilds.cache.values()) {
-      await guild.commands.set([]);
+      await guild.commands.set(slashCommands);
+      console.log(`Comandos slash registrados inmediatamente en servidor: ${guild.name} (${guild.id})`);
     }
     await client.application.commands.set(slashCommands);
-    console.log('Comandos slash sincronizados globalmente (duplicados eliminados).');
+    console.log('Comandos slash sincronizados globalmente y en servidores.');
   } catch (err) {
     console.error('Error al sincronizar comandos slash:', err.message);
   }
