@@ -14,6 +14,7 @@ Created by 00JXPI.
 - Includes a native HTTP server to prevent sleep on free hosting platforms like Render.
 - **Commands**:
   - `/detected`: Shows real-time presence of the monitored Roblox user.
+  - `/cookie`: Checks if the Roblox authentication cookie is active and valid (includes automatic 12-hour background check that alerts only if it fails).
   - `/clear <amount>`: Clears a specified number of messages in the channel (from bottom to top).
   - `/on`: Enables `@everyone` mention in game notifications.
   - `/off`: Disables `@everyone` mention in game notifications (the bot will still send the message and join link in silent mode).
@@ -62,6 +63,7 @@ Creado por 00JXPI.
 - Incluye un servidor HTTP nativo para evitar la suspensión en plataformas de hosting gratuito como Render.
 - **Comandos**:
   - `/detected`: Muestra el estado en tiempo real del usuario de Roblox monitoreado.
+  - `/cookie`: Verifica si la cookie de autenticación de Roblox sigue operativa y válida (incluye auto-verificación cada 12 horas que solo avisa si deja de funcionar).
   - `/clear <cantidad>`: Borra la cantidad especificada de mensajes en el canal (de abajo hacia arriba).
   - `/on`: Activa la mención `@everyone` cuando el usuario entra a jugar.
   - `/off`: Desactiva la mención `@everyone` (el bot sigue mandando el mensaje y enlace al juego, pero en silencio sin etiquetar a todos).

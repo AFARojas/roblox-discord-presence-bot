@@ -234,6 +234,153 @@ async function handleDetectedTextMessage(message, robloxUser) {
   }
 }
 
+// Función para verificar el estado de la cookie de Roblox
+async function verifyRobloxCookie() {
+  const currentCookie = process.env.ROBLOX_COOKIE || ROBLOX_COOKIE;
+  if (!currentCookie) {
+    return {
+      valid: false,
+      reason: 'No hay ninguna cookie configurada en la variable ROBLOX_COOKIE.'
+    };
+  }
+
+  try {
+    const response = await axios.get('https://users.roblox.com/v1/users/authenticated', {
+      headers: {
+        'Cookie': `.ROBLOSECURITY=${currentCookie};`,
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+      },
+      timeout: 10000
+    });
+
+    if (response.status === 200 && response.data && response.data.id) {
+      return {
+        valid: true,
+        user: response.data // { id, name, displayName }
+      };
+    }
+
+    return {
+      valid: false,
+      reason: 'Respuesta inesperada al validar con Roblox.'
+    };
+  } catch (error) {
+    if (error.response && (error.response.status === 401 || error.response.status === 403)) {
+      return {
+        valid: false,
+        status: error.response.status,
+        reason: 'Cookie expirada, revocada o sesión invalidada (Error 401/403).'
+      };
+    }
+    return {
+      valid: false,
+      status: error.response?.status,
+      reason: error.message || 'Error de conexión con los servidores de Roblox.'
+    };
+  }
+}
+
+// Construir Embed para el estado de la cookie (/cookie)
+async function buildCookieEmbed() {
+  const result = await verifyRobloxCookie();
+
+  if (result.valid) {
+    const isTargetUser = String(result.user.id) === String(ROBLOX_USER_ID);
+    const embed = new EmbedBuilder()
+      .setColor(0x2ECC71) // Verde
+      .setTitle('🍪 Estado de la Cookie: Operativa 🟢')
+      .setDescription('La cookie de autenticación de Roblox **está activa y funcionando correctamente**.')
+      .addFields(
+        { name: '👤 Cuenta autenticada', value: `**${result.user.displayName}** (@${result.user.name})`, inline: true },
+        { name: '🆔 ID de Usuario', value: `\`${result.user.id}\``, inline: true },
+        { name: '🎯 Vinculación objetivo', value: isTargetUser ? '✅ Coincide con la cuenta monitoreada' : `⚠️ Monitoreando a ID \`${ROBLOX_USER_ID}\``, inline: false },
+        { name: '⏰ Auto-chequeo (12h)', value: 'Verificación automática cada 12 horas activa (solo emitirá alerta si deja de funcionar).', inline: false }
+      )
+      .setThumbnail(`https://www.roblox.com/headshot-thumbnail/image?userId=${result.user.id}&width=150&height=150&format=png`)
+      .setTimestamp()
+      .setFooter({ text: 'Sistema de Autenticación • Roblox Presence', iconURL: 'https://images.rbxcdn.com/264b971e44cc076f7b3a7b9319853c07.png' });
+
+    return { valid: true, embed };
+  } else {
+    const embed = new EmbedBuilder()
+      .setColor(0xE74C3C) // Rojo
+      .setTitle('🍪 Estado de la Cookie: NO Operativa 🔴')
+      .setDescription('⚠️ **La cookie de Roblox actual no está funcionando o ha expirado.**')
+      .addFields(
+        { name: '❌ Causa / Diagnóstico', value: result.reason || 'No autorizada / sesión caducada', inline: false },
+        { name: '🛠️ Solución', value: 'Debes obtener una nueva cookie `.ROBLOSECURITY` desde el navegador y actualizar la variable `ROBLOX_COOKIE` en Render.', inline: false }
+      )
+      .setTimestamp()
+      .setFooter({ text: 'Sistema de Autenticación • Roblox Presence', iconURL: 'https://images.rbxcdn.com/264b971e44cc076f7b3a7b9319853c07.png' });
+
+    return { valid: false, embed };
+  }
+}
+
+// Responder por Slash Command (/cookie)
+async function handleCookieSlashCommand(interaction) {
+  try {
+    await interaction.deferReply();
+    const { embed } = await buildCookieEmbed();
+    await interaction.editReply({ embeds: [embed] });
+  } catch (error) {
+    console.error('Error al ejecutar /cookie por slash:', error.message);
+    if (interaction.deferred || interaction.replied) {
+      await interaction.editReply('Ocurrió un error al verificar la cookie de Roblox.');
+    } else {
+      await interaction.reply({ content: 'Ocurrió un error al verificar la cookie de Roblox.', ephemeral: true });
+    }
+  }
+}
+
+// Responder por mensaje de texto directo (/cookie)
+async function handleCookieTextMessage(message) {
+  try {
+    const { embed } = await buildCookieEmbed();
+    await message.channel.send({ embeds: [embed] });
+  } catch (error) {
+    console.error('Error al ejecutar /cookie por texto:', error.message);
+    await message.channel.send('Ocurrió un error al verificar la cookie de Roblox.');
+  }
+}
+
+// Verificación automática de la cookie cada 12 horas (solo avisa si NO funciona)
+const COOKIE_CHECK_INTERVAL = 12 * 60 * 60 * 1000; // 12 horas
+
+async function checkCookiePeriodic(channel) {
+  console.log(`[${new Date().toLocaleTimeString()}] Ejecutando verificación periódica de cookie de Roblox (cada 12h)...`);
+  const result = await verifyRobloxCookie();
+
+  if (result.valid) {
+    console.log(`[Cookie Check 12h] Cookie operativa para ${result.user.name} (${result.user.id}). No se envía mensaje a Discord.`);
+  } else {
+    console.warn(`[Cookie Check 12h] ¡ALERTA! La cookie de Roblox ha dejado de funcionar: ${result.reason}`);
+    
+    const alertEmbed = new EmbedBuilder()
+      .setColor(0xE74C3C) // Rojo
+      .setTitle('🚨 ALERTA: La cookie de Roblox ha dejado de funcionar')
+      .setDescription('La verificación automática periódica (cada 12h) detectó que **la cookie de sesión de Roblox ha expirado o ya no es válida**.')
+      .addFields(
+        { name: '❌ Motivo', value: result.reason || 'Sesión no autorizada', inline: false },
+        { name: '⚠️ Impacto en el Bot', value: 'El bot no podrá consultar la presencia autenticada ni datos privados hasta que la cookie sea renovada.', inline: false },
+        { name: '🛠️ Instrucción de renovación', value: 'Inicia sesión en Roblox, extrae la nueva cookie `.ROBLOSECURITY` y actualízala en el panel o variables de Render (`ROBLOX_COOKIE`).', inline: false }
+      )
+      .setTimestamp()
+      .setFooter({ text: 'Verificación Automática de Salud (12h) • Roblox Presence', iconURL: 'https://images.rbxcdn.com/264b971e44cc076f7b3a7b9319853c07.png' });
+
+    try {
+      await channel.send({
+        content: '@everyone ⚠️ **Atención:** La cookie de Roblox configurada ha expirado o dejado de funcionar.',
+        embeds: [alertEmbed],
+        allowedMentions: { parse: ['everyone'] }
+      });
+      console.log('Alerta de cookie expirada enviada al canal de Discord.');
+    } catch (err) {
+      console.error('Error al enviar alerta de cookie a Discord:', err.message);
+    }
+  }
+}
+
 // Función principal de monitoreo
 async function checkRobloxPresence(discordChannel, robloxUser) {
   try {
@@ -498,6 +645,8 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.reply({ content: 'Ocurrió un error al desactivar las notificaciones.', ephemeral: true });
       }
     }
+  } else if (interaction.commandName === 'cookie') {
+    await handleCookieSlashCommand(interaction);
   }
 });
 
@@ -552,6 +701,8 @@ client.on('messageCreate', async (message) => {
       console.error('Error al ejecutar /off por texto:', error.message);
       await message.channel.send('Ocurrió un error al desactivar las notificaciones.');
     }
+  } else if (content.toLowerCase() === '/cookie' || content.toLowerCase() === '!cookie') {
+    await handleCookieTextMessage(message);
   }
 });
 
@@ -617,6 +768,10 @@ client.once('ready', async () => {
     {
       name: 'off',
       description: 'Desactiva la mención @everyone (sigue enviando mensaje pero sin ping)'
+    },
+    {
+      name: 'cookie',
+      description: 'Verifica si la cookie de autenticación de Roblox sigue operativa'
     }
   ];
 
@@ -650,6 +805,9 @@ client.once('ready', async () => {
   // Ejecutar inmediatamente al iniciar y luego configurar intervalo
   checkRobloxPresence(channel, cachedRobloxUser);
   setInterval(() => checkRobloxPresence(channel, cachedRobloxUser), POLL_INTERVAL);
+
+  // Verificación periódica de la cookie cada 12 horas (solo avisa si deja de funcionar)
+  setInterval(() => checkCookiePeriodic(channel), COOKIE_CHECK_INTERVAL);
 });
 
 console.log('Conectando cliente a Discord Gateway con el token proporcionado...');
