@@ -1479,13 +1479,13 @@ client.once('ready', async () => {
     }
   ];
 
-  // Limpiar comandos duplicados de servidor y mantener únicamente el registro global
+  // Sincronizar comandos tanto a nivel de servidor (aparición inmediata) como global
   try {
     for (const guild of client.guilds.cache.values()) {
-      await guild.commands.set([]);
+      await guild.commands.set(slashCommands);
     }
     await client.application.commands.set(slashCommands);
-    console.log('Comandos slash sincronizados globalmente (duplicados de servidor eliminados).');
+    console.log('Comandos slash sincronizados exitosamente en servidores y de forma global.');
   } catch (err) {
     console.error('Error al sincronizar comandos slash:', err.message);
   }
