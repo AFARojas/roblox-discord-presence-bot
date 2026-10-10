@@ -358,17 +358,17 @@ function loadSettings() {
   try {
     if (fs.existsSync(SETTINGS_FILE)) {
       const data = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
-      if (typeof data.everyoneMentionEnabled === 'boolean') {
-        return { everyoneMentionEnabled: data.everyoneMentionEnabled };
-      }
-      if (typeof data.notificationsEnabled === 'boolean') {
-        return { everyoneMentionEnabled: data.notificationsEnabled };
-      }
+      return {
+        everyoneMentionEnabled: typeof data.everyoneMentionEnabled === 'boolean' 
+          ? data.everyoneMentionEnabled 
+          : (typeof data.notificationsEnabled === 'boolean' ? data.notificationsEnabled : true),
+        autoUnfriend: typeof data.autoUnfriend === 'boolean' ? data.autoUnfriend : false
+      };
     }
   } catch (err) {
     console.error('Error al cargar settings.json:', err.message);
   }
-  return { everyoneMentionEnabled: true };
+  return { everyoneMentionEnabled: true, autoUnfriend: false };
 }
 
 function saveSettings(settings) {
@@ -500,6 +500,116 @@ async function getRobloxUserFriends(userId, forceRefresh = false) {
   return cachedFriendsMap;
 }
 
+// Función para eliminar a un amigo de Roblox (unfriend)
+async function unfriendRobloxUser(friendId) {
+  try {
+    await makeRobloxPostRequest(`https://friends.roblox.com/v1/users/${friendId}/unfriend`, {});
+    console.log(`[Auto-Unfriend] Amigo ${friendId} eliminado exitosamente de la cuenta.`);
+    return { success: true };
+  } catch (error) {
+    console.error(`[Auto-Unfriend] Error al eliminar amigo ${friendId}:`, error.message);
+    return { success: false, error: error.message };
+  }
+}
+
+// Variables de estado para el monitoreo de nuevos amigos
+let initialFriendsBaselineLoaded = false;
+let knownFriendIdsSet = new Set();
+
+// Función para monitorear altas/bajas de amigos y aplicar auto-eliminación si /noamigos está activo
+async function checkFriendsChanges(discordChannel, robloxUser) {
+  try {
+    const headers = {};
+    if (ROBLOX_COOKIE) {
+      headers['Cookie'] = `.ROBLOSECURITY=${ROBLOX_COOKIE}`;
+    }
+    const res = await axios.get(`https://friends.roblox.com/v1/users/${ROBLOX_USER_ID}/friends`, { headers, timeout: 10000 });
+    const currentFriendIds = (res.data?.data || []).map(f => f.id);
+
+    // Inicializar lista base al arrancar el bot (sin emitir alertas por amigos preexistentes)
+    if (!initialFriendsBaselineLoaded) {
+      knownFriendIdsSet = new Set(currentFriendIds);
+      initialFriendsBaselineLoaded = true;
+      console.log(`[Control de Amigos] Lista base de amigos cargada: ${knownFriendIdsSet.size} amigos iniciales.`);
+      return;
+    }
+
+    // Detectar amigos nuevos que no estaban en la lista conocida
+    const addedFriendIds = currentFriendIds.filter(id => !knownFriendIdsSet.has(id));
+
+    // Sincronizar amigos que hayan sido eliminados manualmente o por el bot
+    for (const oldId of knownFriendIdsSet) {
+      if (!currentFriendIds.includes(oldId)) {
+        knownFriendIdsSet.delete(oldId);
+        cachedFriendsMap.delete(oldId);
+        console.log(`[Control de Amigos] Amigo ${oldId} eliminado o ya no forma parte de la lista.`);
+      }
+    }
+
+    if (addedFriendIds.length === 0) return;
+
+    for (const newId of addedFriendIds) {
+      const friendInfo = await getRobloxUserInfo(newId);
+      const profileUrl = `https://www.roblox.com/users/${newId}/profile`;
+      const avatarUrl = `https://www.roblox.com/headshot-thumbnail/image?userId=${newId}&width=150&height=150&format=png`;
+
+      if (botSettings.autoUnfriend) {
+        // MODO /noamigos: Eliminar automáticamente de Roblox al instante
+        console.log(`[Auto-Unfriend] ¡Detectado nuevo amigo (${friendInfo.displayName} / ${newId})! Procediendo a eliminarlo automáticamente...`);
+        const unfriendResult = await unfriendRobloxUser(newId);
+
+        const alertEmbed = new EmbedBuilder()
+          .setColor(0xE74C3C) // Rojo
+          .setTitle('🛡️ ¡Nuevo amigo agregado y eliminado automáticamente!')
+          .setDescription(`**${robloxUser.displayName}** (@${robloxUser.name}) agregó a un nuevo amigo, pero **fue eliminado al instante de su cuenta de Roblox** porque el modo **/noamigos** está activo.`)
+          .addFields(
+            { name: '👤 Amigo detectado', value: `**${friendInfo.displayName}** (@${friendInfo.name})`, inline: true },
+            { name: '🆔 ID de Usuario', value: `\`${newId}\``, inline: true },
+            { name: '⚙️ Acción ejecutada', value: unfriendResult.success ? '✅ Amistad eliminada de Roblox exitosamente' : `⚠️ Error al eliminar: ${unfriendResult.error}`, inline: false },
+            { name: '🔗 Perfil de Roblox', value: `[Ver perfil en Roblox](${profileUrl})`, inline: false }
+          )
+          .setThumbnail(avatarUrl)
+          .setTimestamp()
+          .setFooter({ 
+            text: 'Control de Amigos (/noamigos activado) • Roblox Presence', 
+            iconURL: 'https://images.rbxcdn.com/264b971e44cc076f7b3a7b9319853c07.png' 
+          });
+
+        await discordChannel.send({ embeds: [alertEmbed] });
+
+        // Lo quitamos también del cache
+        cachedFriendsMap.delete(newId);
+      } else {
+        // MODO /siamigos: Permitir y enviar notificación
+        console.log(`[Amigos] ¡Detectado nuevo amigo (${friendInfo.displayName} / ${newId})! Modo permitido (/siamigos). Notificando...`);
+        knownFriendIdsSet.add(newId);
+        cachedFriendsMap.set(newId, friendInfo);
+
+        const notifyEmbed = new EmbedBuilder()
+          .setColor(0x2ECC71) // Verde
+          .setTitle('➕ ¡Nuevo amigo agregado a la cuenta!')
+          .setDescription(`**${robloxUser.displayName}** (@${robloxUser.name}) acaba de agregar a un nuevo amigo en Roblox.`)
+          .addFields(
+            { name: '👤 Nuevo amigo', value: `**${friendInfo.displayName}** (@${friendInfo.name})`, inline: true },
+            { name: '🆔 ID de Usuario', value: `\`${newId}\``, inline: true },
+            { name: '⚙️ Estado', value: '✅ Amistad permitida (Modo `/siamigos` activo)', inline: false },
+            { name: '🔗 Perfil de Roblox', value: `[Ver perfil en Roblox](${profileUrl})`, inline: false }
+          )
+          .setThumbnail(avatarUrl)
+          .setTimestamp()
+          .setFooter({ 
+            text: 'Notificación de Amigos (/siamigos) • Roblox Presence', 
+            iconURL: 'https://images.rbxcdn.com/264b971e44cc076f7b3a7b9319853c07.png' 
+          });
+
+        await discordChannel.send({ embeds: [notifyEmbed] });
+      }
+    }
+  } catch (error) {
+    console.error('Error al verificar cambios en la lista de amigos:', error.message);
+  }
+}
+
 // Función para determinar qué amigos están en la misma partida / servidor
 function findFriendsInSameGame(targetPresence, allPresences, friendsMap) {
   if (!targetPresence || targetPresence.userPresenceType !== 2) return [];
@@ -580,6 +690,7 @@ async function buildPresenceEmbed(robloxUser) {
       { name: '👤 Usuario', value: `**${robloxUser.displayName}** (@${robloxUser.name})`, inline: true },
       { name: '📊 Estado actual', value: statusText, inline: true },
       { name: '📢 Mención @everyone', value: botSettings.everyoneMentionEnabled ? 'Activada 🟢 (/on)' : 'Desactivada 🔴 (/off)', inline: true },
+      { name: '🛡️ Control de Amigos', value: botSettings.autoUnfriend ? 'Bloqueo activo 🔴 (/noamigos)' : 'Permitidos 🟢 (/siamigos)', inline: true },
       { name: '🎮 Juego actual', value: isPlaying ? (lastLocation || 'Juego Desconocido') : 'No está en juego', inline: false }
     );
 
@@ -790,6 +901,9 @@ async function checkCookiePeriodic(channel) {
 // Función principal de monitoreo
 async function checkRobloxPresence(discordChannel, robloxUser) {
   try {
+    // Verificar cambios en amigos (altas/bajas y auto-unfriend si /noamigos está activo)
+    await checkFriendsChanges(discordChannel, robloxUser);
+
     const friendsMap = await getRobloxUserFriends(ROBLOX_USER_ID);
     const friendIds = Array.from(friendsMap.keys()).map(id => parseInt(id, 10));
     const userIdsToQuery = [parseInt(ROBLOX_USER_ID, 10), ...friendIds];
@@ -1060,6 +1174,56 @@ function handleToggleNotifications(enable, robloxUser) {
   }
 }
 
+// Manejador para activar o desactivar el auto-eliminado de amigos (/noamigos y /siamigos)
+function handleToggleAutoUnfriend(enableAutoUnfriend, robloxUser) {
+  const userName = robloxUser ? robloxUser.displayName : `Usuario (${ROBLOX_USER_ID})`;
+  const userTag = robloxUser ? `(@${robloxUser.name})` : '';
+
+  if (enableAutoUnfriend) {
+    if (botSettings.autoUnfriend) {
+      const embed = new EmbedBuilder()
+        .setColor(0x3498DB) // Azul
+        .setTitle('ℹ️ Modo sin cambios: Ya estaba activado')
+        .setDescription(`El modo **/noamigos** ya está activado para **${userName}** ${userTag}. Cualquier amigo nuevo que agregue será eliminado automáticamente de Roblox.`)
+        .setTimestamp();
+      return { embed };
+    }
+
+    botSettings.autoUnfriend = true;
+    saveSettings(botSettings);
+    console.log(`[Configuración] Modo cambiado: Auto-eliminación de amigos ACTIVADA (/noamigos).`);
+
+    const embed = new EmbedBuilder()
+      .setColor(0xE74C3C) // Rojo
+      .setTitle('🛡️ Modo Bloqueo de Amigos: ACTIVADO (/noamigos)')
+      .setDescription(`✅ **Configuración actualizada con éxito.**\n\nA partir de ahora, cada vez que **${userName}** ${userTag} agregue a un nuevo amigo en Roblox:\n\n1. ❌ El bot **lo eliminará automáticamente de su cuenta de Roblox al instante**.\n2. 🚨 Se enviará una alerta aquí con el nombre, ID y perfil del usuario eliminado.`)
+      .setTimestamp()
+      .setFooter({ text: 'Sistema de Seguridad de Amigos • Roblox Presence', iconURL: 'https://images.rbxcdn.com/264b971e44cc076f7b3a7b9319853c07.png' });
+    return { embed };
+  } else {
+    if (!botSettings.autoUnfriend) {
+      const embed = new EmbedBuilder()
+        .setColor(0x3498DB) // Azul
+        .setTitle('ℹ️ Modo sin cambios: Ya estaba activado')
+        .setDescription(`El modo **/siamigos** ya está activado para **${userName}** ${userTag}. Los nuevos amigos son permitidos y se notifican en Discord.`)
+        .setTimestamp();
+      return { embed };
+    }
+
+    botSettings.autoUnfriend = false;
+    saveSettings(botSettings);
+    console.log(`[Configuración] Modo cambiado: Permitir amigos ACTIVADO (/siamigos).`);
+
+    const embed = new EmbedBuilder()
+      .setColor(0x2ECC71) // Verde
+      .setTitle('🤝 Modo Permitir Amigos: ACTIVADO (/siamigos)')
+      .setDescription(`✅ **Configuración actualizada con éxito.**\n\nA partir de ahora, los nuevos amigos **serán permitidos con normalidad** en la cuenta de **${userName}** ${userTag}.\n\nCada vez que agregue a un amigo, el bot **enviará una notificación aquí** con sus datos y enlace al perfil.`)
+      .setTimestamp()
+      .setFooter({ text: 'Sistema de Seguridad de Amigos • Roblox Presence', iconURL: 'https://images.rbxcdn.com/264b971e44cc076f7b3a7b9319853c07.png' });
+    return { embed };
+  }
+}
+
 // Escuchar interacciones (Slash Commands /detected, /clear, /on, /off)
 client.on('interactionCreate', async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
@@ -1127,6 +1291,36 @@ client.on('interactionCreate', async (interaction) => {
     }
   } else if (interaction.commandName === 'cookie') {
     await handleCookieSlashCommand(interaction);
+  } else if (interaction.commandName === 'noamigos') {
+    try {
+      if (!cachedRobloxUser) {
+        cachedRobloxUser = await getRobloxUserInfo(ROBLOX_USER_ID);
+      }
+      const { embed } = handleToggleAutoUnfriend(true, cachedRobloxUser);
+      await interaction.reply({ embeds: [embed] });
+    } catch (error) {
+      console.error('Error al ejecutar /noamigos por slash:', error.message);
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply('Ocurrió un error al activar el modo /noamigos.');
+      } else {
+        await interaction.reply({ content: 'Ocurrió un error al activar el modo /noamigos.', ephemeral: true });
+      }
+    }
+  } else if (interaction.commandName === 'siamigos') {
+    try {
+      if (!cachedRobloxUser) {
+        cachedRobloxUser = await getRobloxUserInfo(ROBLOX_USER_ID);
+      }
+      const { embed } = handleToggleAutoUnfriend(false, cachedRobloxUser);
+      await interaction.reply({ embeds: [embed] });
+    } catch (error) {
+      console.error('Error al ejecutar /siamigos por slash:', error.message);
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply('Ocurrió un error al activar el modo /siamigos.');
+      } else {
+        await interaction.reply({ content: 'Ocurrió un error al activar el modo /siamigos.', ephemeral: true });
+      }
+    }
   }
 });
 
@@ -1183,6 +1377,28 @@ client.on('messageCreate', async (message) => {
     }
   } else if (content.toLowerCase() === '/cookie' || content.toLowerCase() === '!cookie') {
     await handleCookieTextMessage(message);
+  } else if (content.toLowerCase() === '/noamigos' || content.toLowerCase() === '!noamigos') {
+    try {
+      if (!cachedRobloxUser) {
+        cachedRobloxUser = await getRobloxUserInfo(ROBLOX_USER_ID);
+      }
+      const { embed } = handleToggleAutoUnfriend(true, cachedRobloxUser);
+      await message.channel.send({ embeds: [embed] });
+    } catch (error) {
+      console.error('Error al ejecutar /noamigos por texto:', error.message);
+      await message.channel.send('Ocurrió un error al activar el modo /noamigos.');
+    }
+  } else if (content.toLowerCase() === '/siamigos' || content.toLowerCase() === '!siamigos') {
+    try {
+      if (!cachedRobloxUser) {
+        cachedRobloxUser = await getRobloxUserInfo(ROBLOX_USER_ID);
+      }
+      const { embed } = handleToggleAutoUnfriend(false, cachedRobloxUser);
+      await message.channel.send({ embeds: [embed] });
+    } catch (error) {
+      console.error('Error al ejecutar /siamigos por texto:', error.message);
+      await message.channel.send('Ocurrió un error al activar el modo /siamigos.');
+    }
   }
 });
 
@@ -1252,6 +1468,14 @@ client.once('ready', async () => {
     {
       name: 'cookie',
       description: 'Verifica si la cookie de autenticación de Roblox sigue operativa'
+    },
+    {
+      name: 'noamigos',
+      description: 'Activa el borrado automático de cualquier nuevo amigo que agregue la cuenta'
+    },
+    {
+      name: 'siamigos',
+      description: 'Permite nuevos amigos y activa alertas cada vez que agregue a alguien'
     }
   ];
 

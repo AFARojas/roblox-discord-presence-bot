@@ -20,6 +20,8 @@ Created by 00JXPI.
   - `/clear <amount>`: Clears a specified number of messages in the channel (from bottom to top).
   - `/on`: Enables `@everyone` mention in game notifications.
   - `/off`: Disables `@everyone` mention in game notifications (the bot will still send the message and join link in silent mode).
+  - `/noamigos`: Enables auto-unfriend mode (any newly added friend is instantly removed from the Roblox account and reported).
+  - `/siamigos`: Disables auto-unfriend mode (allows new friends and sends a notification when someone is added).
 
 ---
 
@@ -71,6 +73,8 @@ Creado por 00JXPI.
   - `/clear <cantidad>`: Borra la cantidad especificada de mensajes en el canal (de abajo hacia arriba).
   - `/on`: Activa la mención `@everyone` cuando el usuario entra a jugar.
   - `/off`: Desactiva la mención `@everyone` (el bot sigue mandando el mensaje y enlace al juego, pero en silencio sin etiquetar a todos).
+  - `/noamigos`: Activa el modo bloqueo de amigos (cada vez que la cuenta agregue a alguien, el bot lo borra automáticamente de Roblox al instante y avisa en Discord).
+  - `/siamigos`: Permite nuevos amigos en la cuenta y notifica en Discord con sus datos y perfil cada vez que agregue a uno.
 
 ---
 
