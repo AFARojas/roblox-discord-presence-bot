@@ -8,11 +8,302 @@ if (dns.setDefaultResultOrder) {
 const { Client, GatewayIntentBits, EmbedBuilder, PermissionFlagsBits, ActivityType } = require('discord.js');
 const axios = require('axios');
 const http = require('http');
+const url = require('url');
 
-// Servidor HTTP simple para mantener vivo el bot en Render/Glitch (evita la suspensión)
+// Obtener la URL base pública del bot (Render u otro host)
+function getBaseUrl() {
+  if (process.env.PUBLIC_URL) return process.env.PUBLIC_URL.replace(/\/$/, '');
+  if (process.env.RENDER_EXTERNAL_URL) return process.env.RENDER_EXTERNAL_URL.replace(/\/$/, '');
+  return 'https://roblox-presence-ohio.onrender.com';
+}
+
+// Generador de interfaz web para redirección directa a la lobby/servidor de Roblox
+function renderJoinHtml(placeId, gameId, gameName) {
+  const safePlaceId = String(placeId || '').replace(/[^0-9]/g, '');
+  const safeGameId = String(gameId || '').replace(/[^a-zA-Z0-9-]/g, '');
+  const safeGameName = (gameName || 'Partida de Roblox').replace(/[<>&"']/g, (c) => {
+    switch (c) {
+      case '<': return '&lt;';
+      case '>': return '&gt;';
+      case '&': return '&amp;';
+      case '"': return '&quot;';
+      case "'": return '&#39;';
+      default: return c;
+    }
+  });
+
+  const protocolUrl = safeGameId 
+    ? `roblox://experiences/start?placeId=${safePlaceId}&gameInstanceId=${safeGameId}`
+    : `roblox://experiences/start?placeId=${safePlaceId}`;
+  const webUrl = `https://www.roblox.com/games/${safePlaceId}` + (safeGameId ? `?serverJobId=${safeGameId}` : '');
+  const consoleScript = safeGameId 
+    ? `Roblox.GameLauncher.joinGameInstance(${safePlaceId}, "${safeGameId}")`
+    : `Roblox.GameLauncher.joinGameInstance(${safePlaceId})`;
+
+  return `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Unirse a ${safeGameName} | Roblox Direct Join</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: radial-gradient(circle at 50% 20%, #1e1b4b 0%, #090d16 60%, #030712 100%);
+      color: #f1f5f9;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .card {
+      background: rgba(15, 23, 42, 0.78);
+      border: 1px solid rgba(99, 102, 241, 0.3);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7), 0 0 40px rgba(99, 102, 241, 0.15);
+      border-radius: 24px;
+      max-width: 520px;
+      width: 100%;
+      padding: 36px 32px;
+      text-align: center;
+      position: relative;
+    }
+    .badge-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(34, 197, 94, 0.15);
+      border: 1px solid rgba(34, 197, 94, 0.3);
+      color: #4ade80;
+      padding: 6px 14px;
+      border-radius: 9999px;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 20px;
+    }
+    .pulse-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #22c55e;
+      box-shadow: 0 0 10px #22c55e;
+      animation: pulse 1.8s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.85); }
+    }
+    h1 {
+      font-size: 24px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      color: #ffffff;
+      line-height: 1.3;
+    }
+    p.subtitle {
+      color: #94a3b8;
+      font-size: 14px;
+      margin-bottom: 24px;
+    }
+    .btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      width: 100%;
+      padding: 14px 20px;
+      border-radius: 14px;
+      font-size: 15px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.2s ease;
+      cursor: pointer;
+      border: none;
+      margin-bottom: 12px;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+      color: #ffffff;
+      box-shadow: 0 10px 20px -5px rgba(79, 70, 229, 0.4);
+    }
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 15px 25px -5px rgba(79, 70, 229, 0.6);
+      background: linear-gradient(135deg, #818cf8 0%, #6366f1 100%);
+    }
+    .btn-secondary {
+      background: rgba(30, 41, 59, 0.7);
+      color: #cbd5e1;
+      border: 1px solid rgba(148, 163, 184, 0.2);
+    }
+    .btn-secondary:hover {
+      background: rgba(51, 65, 85, 0.8);
+      color: #ffffff;
+    }
+    .info-box {
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid rgba(148, 163, 184, 0.15);
+      border-radius: 12px;
+      padding: 12px 14px;
+      margin-top: 18px;
+      text-align: left;
+    }
+    .info-label {
+      font-size: 11px;
+      color: #64748b;
+      text-transform: uppercase;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      margin-bottom: 4px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .copy-btn {
+      background: rgba(99, 102, 241, 0.2);
+      border: 1px solid rgba(99, 102, 241, 0.4);
+      color: #a5b4fc;
+      border-radius: 6px;
+      font-size: 11px;
+      padding: 2px 8px;
+      cursor: pointer;
+      font-weight: 600;
+      transition: all 0.2s;
+    }
+    .copy-btn:hover {
+      background: #6366f1;
+      color: #ffffff;
+    }
+    .info-val {
+      font-family: monospace;
+      font-size: 12px;
+      color: #cbd5e1;
+      word-break: break-all;
+    }
+    details {
+      margin-top: 18px;
+      text-align: left;
+      font-size: 13px;
+      color: #94a3b8;
+    }
+    summary {
+      cursor: pointer;
+      font-weight: 500;
+      color: #a5b4fc;
+      user-select: none;
+    }
+    .code-snippet {
+      background: #020617;
+      border: 1px solid #1e293b;
+      padding: 10px;
+      border-radius: 8px;
+      font-family: monospace;
+      font-size: 11px;
+      color: #38bdf8;
+      margin-top: 8px;
+      word-break: break-all;
+    }
+    .footer {
+      margin-top: 24px;
+      font-size: 12px;
+      color: #475569;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="badge-status">
+      <div class="pulse-dot"></div>
+      <span>Servidor Activo Detectado</span>
+    </div>
+
+    <h1>${safeGameName}</h1>
+    <p class="subtitle">Conectando a la partida específica en Roblox...</p>
+
+    <a href="${protocolUrl}" class="btn btn-primary" id="launchBtn">
+      🚀 Abrir Servidor en Roblox
+    </a>
+
+    <a href="${webUrl}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary">
+      🌐 Abrir en roblox.com (Soporta BTRoblox / RoPro)
+    </a>
+
+    ${safeGameId ? `
+    <div class="info-box">
+      <div class="info-label">
+        <span>JobId / ID del Servidor</span>
+        <button class="copy-btn" onclick="copyText('${safeGameId}', this)">Copiar ID</button>
+      </div>
+      <div class="info-val">${safeGameId}</div>
+    </div>
+    ` : ''}
+
+    <details>
+      <summary>💡 ¿No se abre el juego en tu servidor?</summary>
+      <div style="margin-top: 10px; line-height: 1.5;">
+        <p>1. Asegúrate de tener la aplicación de <strong>Roblox</strong> instalada en tu equipo.</p>
+        <p style="margin-top: 6px;">2. Si usas extensiones como <strong>BTRoblox</strong> o <strong>RoPro</strong>, haz clic en el botón web ("Abrir en roblox.com").</p>
+        <p style="margin-top: 6px;">3. O pega este comando en la consola del navegador (F12) en la página del juego:</p>
+        <div class="code-snippet" id="consoleCode">${consoleScript}</div>
+        <button class="copy-btn" style="margin-top: 6px;" onclick="copyText(document.getElementById('consoleCode').innerText, this)">Copiar Comando</button>
+      </div>
+    </details>
+
+    <div class="footer">
+      Roblox Presence Bot • Conexión directa
+    </div>
+  </div>
+
+  <script>
+    function copyText(text, btn) {
+      navigator.clipboard.writeText(text).then(() => {
+        const orig = btn.innerText;
+        btn.innerText = '¡Copiado! ✓';
+        btn.style.background = '#22c55e';
+        btn.style.color = '#fff';
+        setTimeout(() => {
+          btn.innerText = orig;
+          btn.style.background = '';
+          btn.style.color = '';
+        }, 2000);
+      });
+    }
+
+    // Intento de apertura automática del protocolo de Roblox tras 600ms
+    window.addEventListener('DOMContentLoaded', () => {
+      setTimeout(() => {
+        window.location.href = "${protocolUrl}";
+      }, 600);
+    });
+  </script>
+</body>
+</html>`;
+}
+
+// Servidor HTTP simple para mantener vivo el bot en Render/Glitch y gestionar uniones directas
 const PORT = process.env.PORT || 3000;
 http.createServer(async (req, res) => {
-  if (req.url === '/diag') {
+  const parsedUrl = url.parse(req.url, true);
+
+  if (parsedUrl.pathname === '/join') {
+    const { placeId, gameId, jobId, gameName } = parsedUrl.query;
+    if (!placeId) {
+      res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' });
+      return res.end('<h1>Error 400: Falta el parámetro placeId</h1>');
+    }
+    const html = renderJoinHtml(placeId, gameId || jobId, gameName);
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    return res.end(html);
+  }
+
+  if (parsedUrl.pathname === '/diag') {
     try {
       const start = Date.now();
       const r = await axios.get('https://discord.com/api/v10/gateway/bot', {
@@ -32,10 +323,11 @@ http.createServer(async (req, res) => {
       }));
     }
   }
-  res.writeHead(200, { 'Content-Type': 'text/plain' });
+
+  res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
   res.end('Roblox Discord presence bot is active!\n');
 }).listen(PORT, () => {
-  console.log(`Servidor HTTP de mantenimiento iniciado en el puerto ${PORT}`);
+  console.log(`Servidor HTTP de mantenimiento y redirección iniciado en el puerto ${PORT}`);
 });
 
 // Validación de variables de entorno
@@ -257,10 +549,14 @@ async function buildPresenceEmbed(robloxUser) {
   const presenceData = presences.find(p => String(p.userId) === String(ROBLOX_USER_ID));
   if (!presenceData) return null;
 
-  const { userPresenceType, placeId, rootPlaceId, lastLocation } = presenceData;
+  const { userPresenceType, placeId, rootPlaceId, lastLocation, gameId } = presenceData;
   const currentRoot = rootPlaceId || placeId;
   const isPlaying = userPresenceType === 2;
+  const baseUrl = getBaseUrl();
   const gameUrl = currentRoot ? `https://www.roblox.com/games/${currentRoot}` : null;
+  const directJoinUrl = currentRoot 
+    ? `${baseUrl}/join?placeId=${currentRoot}` + (gameId ? `&gameId=${encodeURIComponent(gameId)}` : '') + (lastLocation ? `&gameName=${encodeURIComponent(lastLocation)}` : '')
+    : null;
 
   const statusText = PresenceTypes[userPresenceType] || 'Desconocido ❓';
   const embedColor = PresenceColors[userPresenceType] || 0x95A5A6;
@@ -291,8 +587,12 @@ async function buildPresenceEmbed(robloxUser) {
     embed.addFields({ name: '👥 Jugando con amigos', value: friendsFieldText, inline: false });
   }
 
-  if (isPlaying && gameUrl) {
-    embed.addFields({ name: '🔗 Enlace para unirte', value: `[Haz clic aquí para entrar al juego](${gameUrl})`, inline: false });
+  if (isPlaying && directJoinUrl) {
+    let joinValue = `[🚀 Unirse a esta lobby / servidor](${directJoinUrl})\n[🌐 Ver página en Roblox.com](${gameUrl})`;
+    if (gameId) {
+      joinValue += `\n🆔 **JobId:** \`${gameId}\``;
+    }
+    embed.addFields({ name: '🔗 Enlaces para unirte', value: joinValue, inline: false });
   }
 
   embed
@@ -529,7 +829,15 @@ async function checkRobloxPresence(discordChannel, robloxUser) {
       if (startedPlaying || changedGame) {
         console.log(`¡Detectado cambio o inicio de juego! Mención @everyone: ${botSettings.everyoneMentionEnabled ? 'ACTIVADA' : 'DESACTIVADA'}`);
         
+        const baseUrl = getBaseUrl();
         const gameUrl = `https://www.roblox.com/games/${currentRoot}`;
+        const directJoinUrl = `${baseUrl}/join?placeId=${currentRoot}` + (gameId ? `&gameId=${encodeURIComponent(gameId)}` : '') + (lastLocation ? `&gameName=${encodeURIComponent(lastLocation)}` : '');
+        
+        let joinValue = `[🚀 Unirse a esta lobby / servidor](${directJoinUrl})\n[🌐 Ver página en Roblox.com](${gameUrl})`;
+        if (gameId) {
+          joinValue += `\n🆔 **JobId:** \`${gameId}\``;
+        }
+
         let friendsPlayingText = 'Jugando en solitario *(Sin amigos detectados)*';
         if (friendsInServer.length > 0) {
           friendsPlayingText = friendsInServer.map(f => `• **${f.friend.displayName}** (@${f.friend.name})` + (f.exactServer ? ' 🟢 *(Mismo servidor)*' : ' *(Mismo juego)*')).join('\n');
@@ -542,7 +850,7 @@ async function checkRobloxPresence(discordChannel, robloxUser) {
           .addFields(
             { name: '🎮 Juego', value: lastLocation || 'Juego Desconocido', inline: true },
             { name: '👥 Amigos en la partida', value: friendsPlayingText, inline: false },
-            { name: '🔗 Enlace al juego', value: `[Haz clic aquí para unirte](${gameUrl})`, inline: false }
+            { name: '🔗 Enlaces para unirte', value: joinValue, inline: false }
           )
           .setThumbnail(`https://www.roblox.com/headshot-thumbnail/image?userId=${ROBLOX_USER_ID}&width=150&height=150&format=png`)
           .setTimestamp()
@@ -575,7 +883,14 @@ async function checkRobloxPresence(discordChannel, robloxUser) {
         if (newlyJoined.length > 0) {
           for (const item of newlyJoined) {
             console.log(`¡Amigo detectado uniéndose al servidor de ${robloxUser.displayName}! -> ${item.friend.displayName} (@${item.friend.name})`);
+            const baseUrl = getBaseUrl();
             const gameUrl = `https://www.roblox.com/games/${currentRoot}`;
+            const directJoinUrl = `${baseUrl}/join?placeId=${currentRoot}` + (gameId ? `&gameId=${encodeURIComponent(gameId)}` : '') + (lastLocation ? `&gameName=${encodeURIComponent(lastLocation)}` : '');
+            
+            let friendJoinValue = `[🚀 Unirse a su servidor](${directJoinUrl})\n[🌐 Ver página en Roblox.com](${gameUrl})`;
+            if (gameId) {
+              friendJoinValue += `\n🆔 **JobId:** \`${gameId}\``;
+            }
 
             const friendJoinEmbed = new EmbedBuilder()
               .setColor(0x9B59B6) // Morado / Púrpura elegante
@@ -584,7 +899,7 @@ async function checkRobloxPresence(discordChannel, robloxUser) {
               .addFields(
                 { name: '🎮 Juego', value: lastLocation || 'Juego Desconocido', inline: true },
                 { name: '👤 Amigo que se unió', value: `**${item.friend.displayName}** (@${item.friend.name})`, inline: true },
-                { name: '🔗 Enlace para entrar', value: `[Haz clic aquí para unirte al juego](${gameUrl})`, inline: false }
+                { name: '🔗 Enlaces para entrar', value: friendJoinValue, inline: false }
               )
               .setThumbnail(`https://www.roblox.com/headshot-thumbnail/image?userId=${item.friend.id}&width=150&height=150&format=png`)
               .setTimestamp()

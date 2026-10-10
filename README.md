@@ -11,6 +11,7 @@ Created by 00JXPI.
 - Monitors the Roblox presence API periodically.
 - Supports cookie authentication (.ROBLOSECURITY) to monitor presence even when the target user's join privacy is restricted.
 - **Friend Detection & Server Join Alerts**: Automatically detects if the user is playing alone or with friends in the same server, and triggers a real-time alert when a friend joins their server instance mid-game.
+- **Direct Server/Lobby Join (`/join`)**: Provides 1-click direct connection links and protocol launcher into the monitored user's exact server instance (`JobId`), working with or without browser extensions (RoPro, BTRoblox).
 - Sends detailed messages with direct join links.
 - Includes a native HTTP server to prevent sleep on free hosting platforms like Render.
 - **Commands**:
@@ -61,6 +62,7 @@ Creado por 00JXPI.
 - Monitorea la API de presencia de Roblox periódicamente.
 - Soporta autenticación por cookie (.ROBLOSECURITY) para monitorear perfiles incluso si su privacidad está restringida a amigos o privada.
 - **Detección de amigos y alertas de unión en vivo**: Analiza si el usuario está jugando en solitario o con amigos en el mismo servidor, y emite una alerta en Discord cuando un amigo entra a su misma partida.
+- **Unión Directa a la Lobby (`/join`)**: Genera enlaces inteligentes para unirse directamente a la instancia exacta del servidor (`JobId`) de Roblox, con soporte para protocolo directo, extensiones web (RoPro, BTRoblox) o comando de consola.
 - Envía mensajes detallados con enlaces directos para unirse.
 - Incluye un servidor HTTP nativo para evitar la suspensión en plataformas de hosting gratuito como Render.
 - **Comandos**:
