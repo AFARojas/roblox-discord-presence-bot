@@ -10,10 +10,11 @@ Created by 00JXPI.
 
 - Monitors the Roblox presence API periodically.
 - Supports cookie authentication (.ROBLOSECURITY) to monitor presence even when the target user's join privacy is restricted.
+- **Friend Detection & Server Join Alerts**: Automatically detects if the user is playing alone or with friends in the same server, and triggers a real-time alert when a friend joins their server instance mid-game.
 - Sends detailed messages with direct join links.
 - Includes a native HTTP server to prevent sleep on free hosting platforms like Render.
 - **Commands**:
-  - `/detected`: Shows real-time presence of the monitored Roblox user.
+  - `/detected`: Shows real-time presence of the monitored Roblox user and lists who they are playing with.
   - `/cookie`: Checks if the Roblox authentication cookie is active and valid (includes automatic 12-hour background check that alerts only if it fails).
   - `/clear <amount>`: Clears a specified number of messages in the channel (from bottom to top).
   - `/on`: Enables `@everyone` mention in game notifications.
@@ -59,10 +60,11 @@ Creado por 00JXPI.
 
 - Monitorea la API de presencia de Roblox periódicamente.
 - Soporta autenticación por cookie (.ROBLOSECURITY) para monitorear perfiles incluso si su privacidad está restringida a amigos o privada.
+- **Detección de amigos y alertas de unión en vivo**: Analiza si el usuario está jugando en solitario o con amigos en el mismo servidor, y emite una alerta en Discord cuando un amigo entra a su misma partida.
 - Envía mensajes detallados con enlaces directos para unirse.
 - Incluye un servidor HTTP nativo para evitar la suspensión en plataformas de hosting gratuito como Render.
 - **Comandos**:
-  - `/detected`: Muestra el estado en tiempo real del usuario de Roblox monitoreado.
+  - `/detected`: Muestra el estado en tiempo real del usuario de Roblox monitoreado y con qué amigos está jugando.
   - `/cookie`: Verifica si la cookie de autenticación de Roblox sigue operativa y válida (incluye auto-verificación cada 12 horas que solo avisa si deja de funcionar).
   - `/clear <cantidad>`: Borra la cantidad especificada de mensajes en el canal (de abajo hacia arriba).
   - `/on`: Activa la mención `@everyone` cuando el usuario entra a jugar.
