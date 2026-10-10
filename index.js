@@ -95,7 +95,9 @@ let lastState = {
   placeId: null,
   rootPlaceId: null,
   universeId: null,
-  offlineChecksCount: 0
+  gameId: null,
+  offlineChecksCount: 0,
+  friendsInServer: new Set() // IDs de amigos que están en la partida actualmente
 };
 
 let cachedRobloxUser = null;
@@ -157,13 +159,102 @@ async function getRobloxUserInfo(userId) {
   }
 }
 
+// Mapa de amigos cacheados: ID -> { id, name, displayName }
+let cachedFriendsMap = new Map();
+let lastFriendsFetchTime = 0;
+const FRIENDS_REFRESH_INTERVAL = 10 * 60 * 1000; // Refrescar lista de amigos cada 10 minutos
+
+// Función para obtener y cachear la lista de amigos del usuario monitoreado
+async function getRobloxUserFriends(userId, forceRefresh = false) {
+  const now = Date.now();
+  if (!forceRefresh && cachedFriendsMap.size > 0 && (now - lastFriendsFetchTime < FRIENDS_REFRESH_INTERVAL)) {
+    return cachedFriendsMap;
+  }
+
+  try {
+    const headers = {};
+    if (ROBLOX_COOKIE) {
+      headers['Cookie'] = `.ROBLOSECURITY=${ROBLOX_COOKIE}`;
+    }
+    const res = await axios.get(`https://friends.roblox.com/v1/users/${userId}/friends`, { headers });
+    const friendIds = (res.data?.data || []).map(f => f.id);
+
+    if (friendIds.length === 0) {
+      cachedFriendsMap.clear();
+      lastFriendsFetchTime = now;
+      return cachedFriendsMap;
+    }
+
+    // Obtener detalles de los amigos (name y displayName) en bloques de hasta 100
+    const newMap = new Map();
+    for (let i = 0; i < friendIds.length; i += 100) {
+      const chunk = friendIds.slice(i, i + 100);
+      try {
+        const usersRes = await axios.post('https://users.roblox.com/v1/users', { userIds: chunk }, { headers });
+        (usersRes.data?.data || []).forEach(u => newMap.set(u.id, u));
+      } catch (e) {
+        console.error('Error al obtener detalles de amigos en lote:', e.message);
+        chunk.forEach(id => newMap.set(id, { id, name: `Usuario_${id}`, displayName: `Usuario ${id}` }));
+      }
+    }
+
+    cachedFriendsMap = newMap;
+    lastFriendsFetchTime = now;
+    console.log(`[Amigos] Lista de amigos actualizada: ${cachedFriendsMap.size} amigo(s) monitoreado(s).`);
+  } catch (err) {
+    console.error('Error al consultar lista de amigos de Roblox:', err.message);
+  }
+
+  return cachedFriendsMap;
+}
+
+// Función para determinar qué amigos están en la misma partida / servidor
+function findFriendsInSameGame(targetPresence, allPresences, friendsMap) {
+  if (!targetPresence || targetPresence.userPresenceType !== 2) return [];
+
+  const targetPlace = targetPresence.rootPlaceId || targetPresence.placeId;
+  const targetGameId = targetPresence.gameId;
+  const targetUniverse = targetPresence.universeId;
+
+  const friendsPlaying = [];
+
+  for (const p of allPresences) {
+    if (String(p.userId) === String(targetPresence.userId)) continue;
+    if (p.userPresenceType !== 2) continue;
+
+    const friendPlace = p.rootPlaceId || p.placeId;
+    const friendGameId = p.gameId;
+    const friendUniverse = p.universeId;
+
+    const sameServer = Boolean(targetGameId && friendGameId && targetGameId === friendGameId);
+    const sameGame = Boolean((targetPlace && friendPlace && targetPlace === friendPlace) || (targetUniverse && friendUniverse && targetUniverse === friendUniverse));
+
+    // Si coincide el JobId/servidor exacto o coinciden en el juego
+    if (sameServer || (sameGame && !targetGameId)) {
+      const friendInfo = friendsMap.get(p.userId) || { id: p.userId, name: `Usuario_${p.userId}`, displayName: `Amigo ${p.userId}` };
+      friendsPlaying.push({
+        friend: friendInfo,
+        exactServer: sameServer,
+        presence: p
+      });
+    }
+  }
+
+  return friendsPlaying;
+}
+
 // Generar Embed de respuesta
 async function buildPresenceEmbed(robloxUser) {
+  const friendsMap = await getRobloxUserFriends(ROBLOX_USER_ID);
+  const friendIds = Array.from(friendsMap.keys()).map(id => parseInt(id, 10));
+  const userIdsToQuery = [parseInt(ROBLOX_USER_ID, 10), ...friendIds];
+
   const data = await makeRobloxPostRequest('https://presence.roblox.com/v1/presence/users', {
-    userIds: [parseInt(ROBLOX_USER_ID, 10)]
+    userIds: userIdsToQuery
   });
 
-  const presenceData = data?.userPresences?.[0];
+  const presences = data?.userPresences || [];
+  const presenceData = presences.find(p => String(p.userId) === String(ROBLOX_USER_ID));
   if (!presenceData) return null;
 
   const { userPresenceType, placeId, rootPlaceId, lastLocation } = presenceData;
@@ -173,6 +264,17 @@ async function buildPresenceEmbed(robloxUser) {
 
   const statusText = PresenceTypes[userPresenceType] || 'Desconocido ❓';
   const embedColor = PresenceColors[userPresenceType] || 0x95A5A6;
+
+  // Analizar amigos presentes
+  const friendsInServer = isPlaying ? findFriendsInSameGame(presenceData, presences, friendsMap) : [];
+  let friendsFieldText = 'No está en juego';
+  if (isPlaying) {
+    if (friendsInServer.length > 0) {
+      friendsFieldText = friendsInServer.map(f => `• **${f.friend.displayName}** (@${f.friend.name})` + (f.exactServer ? ' 🟢 *(Mismo servidor)*' : ' *(Mismo juego)*')).join('\n');
+    } else {
+      friendsFieldText = '🎮 **Jugando en solitario** *(Sin amigos en su servidor)*';
+    }
+  }
 
   const embed = new EmbedBuilder()
     .setColor(embedColor)
@@ -185,6 +287,10 @@ async function buildPresenceEmbed(robloxUser) {
       { name: '🎮 Juego actual', value: isPlaying ? (lastLocation || 'Juego Desconocido') : 'No está en juego', inline: false }
     );
 
+  if (isPlaying) {
+    embed.addFields({ name: '👥 Jugando con amigos', value: friendsFieldText, inline: false });
+  }
+
   if (isPlaying && gameUrl) {
     embed.addFields({ name: '🔗 Enlace para unirte', value: `[Haz clic aquí para entrar al juego](${gameUrl})`, inline: false });
   }
@@ -192,7 +298,7 @@ async function buildPresenceEmbed(robloxUser) {
   embed
     .setThumbnail(`https://www.roblox.com/headshot-thumbnail/image?userId=${ROBLOX_USER_ID}&width=150&height=150&format=png`)
     .setTimestamp()
-    .setFooter({ text: 'Monitoreo de Roblox (Sin mención)', iconURL: 'https://images.rbxcdn.com/264b971e44cc076f7b3a7b9319853c07.png' });
+    .setFooter({ text: 'Monitoreo de Roblox • Detección de Amigos', iconURL: 'https://images.rbxcdn.com/264b971e44cc076f7b3a7b9319853c07.png' });
 
   return embed;
 }
@@ -384,21 +490,31 @@ async function checkCookiePeriodic(channel) {
 // Función principal de monitoreo
 async function checkRobloxPresence(discordChannel, robloxUser) {
   try {
+    const friendsMap = await getRobloxUserFriends(ROBLOX_USER_ID);
+    const friendIds = Array.from(friendsMap.keys()).map(id => parseInt(id, 10));
+    const userIdsToQuery = [parseInt(ROBLOX_USER_ID, 10), ...friendIds];
+
     const data = await makeRobloxPostRequest('https://presence.roblox.com/v1/presence/users', {
-      userIds: [parseInt(ROBLOX_USER_ID, 10)]
+      userIds: userIdsToQuery
     });
 
-    const presenceData = data?.userPresences?.[0];
+    const presences = data?.userPresences || [];
+    const presenceData = presences.find(p => String(p.userId) === String(ROBLOX_USER_ID));
     if (!presenceData) {
       console.log('No se recibieron datos de presencia de Roblox.');
       return;
     }
 
-    const { userPresenceType, placeId, rootPlaceId, lastLocation, universeId } = presenceData;
+    const { userPresenceType, placeId, rootPlaceId, lastLocation, universeId, gameId } = presenceData;
     const currentRoot = rootPlaceId || placeId;
     
+    // Buscar amigos en el mismo servidor en esta consulta
+    const friendsInServer = userPresenceType === 2 ? findFriendsInSameGame(presenceData, presences, friendsMap) : [];
+    const currentFriendIds = new Set(friendsInServer.map(f => f.friend.id));
+
     console.log(`[${new Date().toLocaleTimeString()}] Estado de ${robloxUser.displayName}: ${PresenceTypes[userPresenceType] || 'Desconocido'}` + 
-      (userPresenceType === 2 ? ` en "${lastLocation}" (ID: ${placeId}, Root ID: ${currentRoot}, Universe: ${universeId})` : ''));
+      (userPresenceType === 2 ? ` en "${lastLocation}" (ID: ${placeId}, Root ID: ${currentRoot}, Universe: ${universeId})` : '') +
+      (friendsInServer.length > 0 ? ` [Con ${friendsInServer.length} amigo(s): ${friendsInServer.map(f => f.friend.displayName).join(', ')}]` : ''));
 
     // Detectar si el usuario ha entrado a un juego (Tipo de presencia 2 = InGame)
     if (userPresenceType === 2) {
@@ -414,13 +530,19 @@ async function checkRobloxPresence(discordChannel, robloxUser) {
         console.log(`¡Detectado cambio o inicio de juego! Mención @everyone: ${botSettings.everyoneMentionEnabled ? 'ACTIVADA' : 'DESACTIVADA'}`);
         
         const gameUrl = `https://www.roblox.com/games/${currentRoot}`;
+        let friendsPlayingText = 'Jugando en solitario *(Sin amigos detectados)*';
+        if (friendsInServer.length > 0) {
+          friendsPlayingText = friendsInServer.map(f => `• **${f.friend.displayName}** (@${f.friend.name})` + (f.exactServer ? ' 🟢 *(Mismo servidor)*' : ' *(Mismo juego)*')).join('\n');
+        }
+
         const embed = new EmbedBuilder()
           .setColor(0x00FF00) // Verde
           .setTitle(`¡${robloxUser.displayName} está jugando a algo!`)
           .setDescription(`**${robloxUser.displayName}** (@${robloxUser.name}) acaba de entrar a un juego.`)
           .addFields(
             { name: '🎮 Juego', value: lastLocation || 'Juego Desconocido', inline: true },
-            { name: '🔗 Enlace al juego', value: `[Haz clic aquí para unirte](${gameUrl})`, inline: true }
+            { name: '👥 Amigos en la partida', value: friendsPlayingText, inline: false },
+            { name: '🔗 Enlace al juego', value: `[Haz clic aquí para unirte](${gameUrl})`, inline: false }
           )
           .setThumbnail(`https://www.roblox.com/headshot-thumbnail/image?userId=${ROBLOX_USER_ID}&width=150&height=150&format=png`)
           .setTimestamp()
@@ -443,8 +565,48 @@ async function checkRobloxPresence(discordChannel, robloxUser) {
           });
           console.log(`Notificación enviada con éxito al canal SIN @everyone (modo silencioso).`);
         }
+
+        // Guardamos los amigos que estaban al inicio
+        lastState.friendsInServer = currentFriendIds;
       } else {
-        console.log(`ℹ️ [Filtro Antispam] ${robloxUser.displayName} sigue en el mismo juego ("${lastLocation}"). Ya fue notificado previamente, no se repite el aviso.`);
+        // El usuario ya estaba en el juego: Detectar si un amigo se unió a su servidor
+        const newlyJoined = friendsInServer.filter(f => !lastState.friendsInServer.has(f.friend.id));
+
+        if (newlyJoined.length > 0) {
+          for (const item of newlyJoined) {
+            console.log(`¡Amigo detectado uniéndose al servidor de ${robloxUser.displayName}! -> ${item.friend.displayName} (@${item.friend.name})`);
+            const gameUrl = `https://www.roblox.com/games/${currentRoot}`;
+
+            const friendJoinEmbed = new EmbedBuilder()
+              .setColor(0x9B59B6) // Morado / Púrpura elegante
+              .setTitle(`👥 ¡Un amigo se ha unido a su servidor!`)
+              .setDescription(`**${item.friend.displayName}** (@${item.friend.name}) se acaba de unir al servidor de **${robloxUser.displayName}**.`)
+              .addFields(
+                { name: '🎮 Juego', value: lastLocation || 'Juego Desconocido', inline: true },
+                { name: '👤 Amigo que se unió', value: `**${item.friend.displayName}** (@${item.friend.name})`, inline: true },
+                { name: '🔗 Enlace para entrar', value: `[Haz clic aquí para unirte al juego](${gameUrl})`, inline: false }
+              )
+              .setThumbnail(`https://www.roblox.com/headshot-thumbnail/image?userId=${item.friend.id}&width=150&height=150&format=png`)
+              .setTimestamp()
+              .setFooter({ 
+                text: 'Detección de Amigos • Roblox Presence', 
+                iconURL: 'https://images.rbxcdn.com/264b971e44cc076f7b3a7b9319853c07.png' 
+              });
+
+            await discordChannel.send({
+              embeds: [friendJoinEmbed],
+              allowedMentions: { parse: [] }
+            });
+            console.log(`Alerta de amigo unido enviada a Discord para ${item.friend.displayName}.`);
+          }
+
+          // Actualizamos la lista de amigos presentes en el servidor
+          lastState.friendsInServer = currentFriendIds;
+        } else {
+          // Si algún amigo salió, actualizamos el set sin spamear
+          lastState.friendsInServer = currentFriendIds;
+          console.log(`ℹ️ [Filtro Antispam] ${robloxUser.displayName} sigue en el mismo juego ("${lastLocation}"). Ya fue notificado previamente, no se repite el aviso.`);
+        }
       }
 
       // Reiniciar contador de desconexión porque está en juego
@@ -452,10 +614,12 @@ async function checkRobloxPresence(discordChannel, robloxUser) {
       lastState.placeId = placeId;
       lastState.rootPlaceId = currentRoot;
       lastState.universeId = universeId;
+      lastState.gameId = gameId;
       lastState.offlineChecksCount = 0;
     } else {
       // El usuario no está en juego. Incrementamos el contador de desconexión.
       lastState.offlineChecksCount += 1;
+      lastState.friendsInServer.clear();
       
       // Si se mantiene fuera durante 2 consultas (1 minuto), reseteamos el estado oficial para detectar un nuevo reingreso
       if (lastState.offlineChecksCount >= 2 || lastState.presenceType === null) {
@@ -466,6 +630,7 @@ async function checkRobloxPresence(discordChannel, robloxUser) {
         lastState.placeId = null;
         lastState.rootPlaceId = null;
         lastState.universeId = null;
+        lastState.gameId = null;
       }
     }
 
@@ -801,6 +966,10 @@ client.once('ready', async () => {
   console.log(`Obteniendo información del usuario de Roblox con ID ${ROBLOX_USER_ID}...`);
   cachedRobloxUser = await getRobloxUserInfo(ROBLOX_USER_ID);
   console.log(`Monitoreando a: ${cachedRobloxUser.displayName} (@${cachedRobloxUser.name})`);
+
+  // Cargar lista inicial de amigos
+  console.log(`Cargando lista inicial de amigos de Roblox...`);
+  await getRobloxUserFriends(ROBLOX_USER_ID, true);
 
   // Ejecutar inmediatamente al iniciar y luego configurar intervalo
   checkRobloxPresence(channel, cachedRobloxUser);
